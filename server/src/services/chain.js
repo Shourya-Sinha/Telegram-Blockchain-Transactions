@@ -7,6 +7,8 @@ const env = require('../config/env');
 const { pickFairBatch } = require('./mempool');
 const { getSettings } = require('./stats');
 const { notifyUser } = require('./telegram');
+const { emitPublic, emitUser } = require('../realtime/socket');
+const { anchorBlock } = require('./evmAnchor');
 
 let mining = false;
 let timer = null;
@@ -46,6 +48,7 @@ async function ensureGenesis() {
 /**
  * Mine one block: fair-pick mempool txs, settle balances atomically-ish,
  * append block, confirm txs, notify users. Runs on an interval.
+ * Emits realtime events + triggers async Sepolia anchoring (never blocking).
  */
 async function mineOnce() {
   if (mining) return null;
@@ -87,7 +90,7 @@ async function mineOnce() {
     const last = await Block.findOne().sort({ number: -1 });
     const number = (last ? last.number : -1) + 1;
     const hash = blockHash(number, last ? last.hash : '0x0', settled);
-    await Block.create({
+    const newBlock = await Block.create({
       number,
       hash,
       prevHash: last ? last.hash : '0x0',
@@ -110,22 +113,61 @@ async function mineOnce() {
       );
     }
 
-    // Notify users (best-effort)
+    // ---- Realtime: live feed for everyone ----
+    emitPublic('block:mined', {
+      number,
+      hash,
+      txCount: settled.length,
+      txs: settled,
+      timestamp: newBlock.timestamp,
+    });
+    emitPublic('mempool:update', { time: new Date().toISOString() });
+
+    // ---- Sepolia anchoring (async, never blocks mining) ----
+    anchorBlock(newBlock).catch((e) => console.warn('[anchor] trigger failed:', e.message));
+
+    // Notify users (best-effort) + per-user socket events
     for (const h of settled) {
       try {
         // eslint-disable-next-line no-await-in-loop
         const tx = await Transaction.findOne({ hash: h });
-        if (tx && tx.fromUser) {
+        if (!tx) continue;
+        emitPublic('tx:confirmed', {
+          hash: h,
+          amount: tx.amount,
+          fromAddress: tx.fromAddress,
+          toAddress: tx.toAddress,
+          blockNumber: number,
+        });
+        if (tx.fromUser) {
+          emitUser(tx.fromUser, 'tx:confirmed', { hash: h, amount: tx.amount, toAddress: tx.toAddress, blockNumber: number, side: 'sent' });
           // eslint-disable-next-line no-await-in-loop
           const u = await User.findById(tx.fromUser);
           if (u) notifyUser(u, 'Transaction confirmed', `Sent ${tx.amount} ${env.TOKEN_SYMBOL} → ${tx.toAddress.slice(0, 10)}… in block #${number}`, h).catch(() => {});
         }
-        if (tx && tx.toUser) {
+        if (tx.toUser) {
+          emitUser(tx.toUser, 'tx:confirmed', { hash: h, amount: tx.amount, fromAddress: tx.fromAddress, blockNumber: number, side: 'received' });
           // eslint-disable-next-line no-await-in-loop
           const u2 = await User.findById(tx.toUser);
           if (u2 && String(u2._id) !== String(tx.fromUser)) {
             notifyUser(u2, 'Tokens received', `+${tx.amount} ${env.TOKEN_SYMBOL} from ${tx.fromAddress.slice(0, 10)}… (block #${number})`, h).catch(() => {});
           }
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
+
+    // Failed receipts → tell the senders over socket too
+    for (const f of failed) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const tx = await Transaction.findOne({ hash: f.hash });
+        if (tx && tx.fromUser) {
+          emitUser(tx.fromUser, 'tx:failed', { hash: f.hash, reason: f.reason });
+          // eslint-disable-next-line no-await-in-loop
+          const u = await User.findById(tx.fromUser);
+          if (u) notifyUser(u, 'Transaction failed', `${f.reason} (${f.hash.slice(0, 12)}…)`, f.hash).catch(() => {});
         }
       } catch (_) {
         /* ignore */

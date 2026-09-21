@@ -1,5 +1,6 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Toasts from './Toasts';
 
 export function statusBadge(status) {
   const map = {
@@ -14,6 +15,23 @@ export function statusBadge(status) {
     requires_approval: 'bg-violet-500/15 text-violet-300',
   };
   return <span className={`badge ${map[status] || 'bg-slate-500/15 text-slate-300'}`}>{status?.replace('_', ' ')}</span>;
+}
+
+export function anchorBadge(block) {
+  const a = block?.anchor;
+  if (!a || !a.evmTxHash) return null;
+  return (
+    <a
+      href={`https://sepolia.etherscan.io/tx/${a.evmTxHash}`}
+      target="_blank"
+      rel="noreferrer"
+      className={`badge ${a.status === 'confirmed' ? 'bg-emerald-500/15 text-emerald-400' : a.status === 'failed' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'}`}
+      title={`Sepolia anchor ${a.status}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      🔗 Sepolia {a.status}
+    </a>
+  );
 }
 
 export default function Layout({ children }) {
@@ -75,6 +93,7 @@ export default function Layout({ children }) {
       <footer className="max-w-6xl mx-auto px-4 py-8 text-center text-xs text-slate-500">
         TBT Chain — fair-order blockchain transactions with Telegram alerts · demo testnet, not real money
       </footer>
+      <Toasts />
     </div>
   );
 }

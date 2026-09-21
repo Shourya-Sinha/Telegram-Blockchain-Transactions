@@ -11,6 +11,15 @@ const blockSchema = new mongoose.Schema(
     reward: { type: Number, default: 0 },
     gasUsed: { type: Number, default: 0 },
     timestamp: { type: Date, default: Date.now },
+    anchor: {
+      status: { type: String, enum: ['none', 'submitted', 'confirmed', 'failed'], default: 'none' },
+      evmTxHash: { type: String, default: null },
+      evmChainId: { type: Number, default: null },
+      evmTo: { type: String, default: null },
+      attempts: { type: Number, default: 0 },
+      lastError: { type: String, default: null },
+      confirmedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

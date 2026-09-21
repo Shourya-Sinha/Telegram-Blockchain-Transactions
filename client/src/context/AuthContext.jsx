@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
+import { connectSocket } from '../realtime/socket';
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -29,12 +30,15 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
+    // Connect socket immediately (anonymous public feed), upgrade on auth
+    connectSocket(localStorage.getItem('tbt_token'));
     refresh();
   }, []);
 
   const login = async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
     localStorage.setItem('tbt_token', data.token);
+    connectSocket(data.token);
     setUser(data.user);
     setWallets(data.wallets || []);
     return data;
@@ -43,6 +47,7 @@ export function AuthProvider({ children }) {
   const register = async (name, email, password) => {
     const { data } = await api.post('/auth/register', { name, email, password });
     localStorage.setItem('tbt_token', data.token);
+    connectSocket(data.token);
     setUser(data.user);
     setWallets(data.wallet ? [data.wallet] : []);
     return data;
@@ -50,6 +55,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('tbt_token');
+    connectSocket(null); // stay connected for the public feed
     setUser(null);
     setWallets([]);
   };

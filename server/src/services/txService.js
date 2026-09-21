@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { txHash } = require('../utils/crypto');
 const { getSettings, calcFee } = require('./stats');
 const { fairnessScore } = require('../utils/fairness');
+const { emitUser, emitPublic, emitAdmin } = require('../realtime/socket');
 
 const SYSTEM_ADDRESS = '0x0000000000000000000000000000000000000001';
 
@@ -15,6 +16,7 @@ function todayKey() {
  * Create a user transfer with real-world guards:
  * - account + wallet checks, daily limits, idempotency, balance lock,
  * - large-tx admin approval, fair-score stamping.
+ * Emits realtime events for live UI updates.
  */
 async function createTransfer(user, { fromAddress, toAddress, amount, note, idempotencyKey }) {
   const s = await getSettings();
@@ -88,6 +90,13 @@ async function createTransfer(user, { fromAddress, toAddress, amount, note, idem
   user.dailySent = Number(((user.dailySent || 0) + amt).toFixed(4));
   await user.save();
 
+  // ---- Realtime ----
+  emitUser(user._id, 'tx:submitted', { hash: tx.hash, amount: amt, fee, toAddress: to, needsApproval });
+  emitPublic('mempool:update', { time: new Date().toISOString() });
+  if (needsApproval) {
+    emitAdmin('tx:approval_needed', { hash: tx.hash, amount: amt, from: user.email, toAddress: to });
+  }
+
   return { tx, duplicate: false, needsApproval };
 }
 
@@ -116,6 +125,9 @@ async function faucetClaim(user) {
   });
   user.lastFaucetAt = new Date();
   await user.save();
+
+  emitUser(user._id, 'tx:submitted', { hash: tx.hash, amount: tx.amount, fee: 0, toAddress: wallet.address, type: 'faucet' });
+  emitPublic('mempool:update', { time: new Date().toISOString() });
   return tx;
 }
 
@@ -135,6 +147,8 @@ async function adminMint(toAddress, amount, adminUser) {
     nonce: 0,
     note: `Minted by admin ${adminUser.email}`,
   });
+  emitPublic('mempool:update', { time: new Date().toISOString() });
+  if (toWallet) emitUser(toWallet.user, 'tx:submitted', { hash: tx.hash, amount: tx.amount, fee: 0, toAddress: to, type: 'mint' });
   return tx;
 }
 
@@ -162,6 +176,9 @@ async function cancelOwn(user, hash) {
   tx.status = 'cancelled';
   tx.processedAt = new Date();
   await tx.save();
+
+  emitUser(user._id, 'tx:cancelled', { hash: tx.hash });
+  emitPublic('mempool:update', { time: new Date().toISOString() });
   return tx;
 }
 

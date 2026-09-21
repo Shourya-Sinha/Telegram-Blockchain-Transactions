@@ -12,6 +12,8 @@ const DEFAULTS = {
   largeTxApprovalThreshold: { value: env.LARGE_TX_APPROVAL_THRESHOLD, description: 'Amount above which admin approval is required (0 = off)' },
   chainPaused: { value: false, description: 'Pause mining (maintenance)' },
   registrationsOpen: { value: true, description: 'Allow new signups' },
+  evmAnchorMode: { value: env.EVM_ANCHOR_MODE || 'off', description: 'Sepolia anchoring: off | post' },
+  evmAnchorAddress: { value: env.EVM_ANCHOR_ADDRESS || '', description: 'Sepolia address receiving anchor txs (blank = self)' },
 };
 
 async function ensureSettings() {

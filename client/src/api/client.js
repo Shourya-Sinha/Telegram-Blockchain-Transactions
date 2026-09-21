@@ -21,3 +21,16 @@ api.interceptors.response.use(
 
 export default api;
 export const errMsg = (e, fb = 'Something went wrong') => e?.response?.data?.error || e.message || fb;
+
+// Authenticated CSV download (sends JWT, saves blob as file)
+export async function downloadCSV(path, filename) {
+  const res = await api.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}

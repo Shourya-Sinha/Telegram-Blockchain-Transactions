@@ -1,4 +1,5 @@
 const env = require('../config/env');
+const { emitUser } = require('../realtime/socket');
 
 let botInstance = null;
 
@@ -24,6 +25,13 @@ async function notifyUser(user, title, message, txHash = null) {
   } catch (e) {
     console.warn('[notify] db failed:', e.message);
   }
+  // Realtime: instant in-app toast, no refresh needed
+  emitUser(user._id || user, 'notification:new', {
+    title,
+    message,
+    txHash,
+    time: new Date().toISOString(),
+  });
   if (user.telegramId) {
     const sym = env.TOKEN_SYMBOL;
     await sendTelegramMessage(

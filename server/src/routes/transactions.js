@@ -7,6 +7,7 @@ const { sendLimiter } = require('../middleware/rateLimit');
 const { createTransfer, cancelOwn } = require('../services/txService');
 const { getSettings, calcFee } = require('../services/stats');
 const { paginate } = require('../utils/paginate');
+const { sendCSV, TX_COLUMNS } = require('../utils/csv');
 
 const router = express.Router();
 router.use(auth);
@@ -59,6 +60,19 @@ router.post('/notifications/read-all', async (req, res, next) => {
   try {
     await Notification.updateMany({ user: req.user._id, read: false }, { $set: { read: true } });
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/transactions/export — my history as CSV (must be before /:hash)
+router.get('/export', async (req, res, next) => {
+  try {
+    const filter = { $or: [{ fromUser: req.user._id }, { toUser: req.user._id }] };
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.type) filter.type = req.query.type;
+    const rows = await Transaction.find(filter).sort({ createdAt: -1 }).limit(5000).lean();
+    sendCSV(res, 'my-transactions.csv', TX_COLUMNS, rows);
   } catch (e) {
     next(e);
   }

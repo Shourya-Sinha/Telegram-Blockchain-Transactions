@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
-import api, { errMsg } from '../../api/client';
+import { useEffect, useRef, useState } from 'react';
+import api, { errMsg, downloadCSV } from '../../api/client';
 import { statusBadge } from '../../components/Layout';
 import { TxRow } from '../Explorer';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { useSocketEvent } from '../../realtime/socket';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from 'recharts';
 
-const TABS = ['Overview', 'Users', 'Transactions', 'Mempool', 'Settings', 'Audit'];
+const TABS = ['Overview', 'Live Pulse', 'Users', 'Transactions', 'Mempool', 'Settings', 'Audit'];
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState('Overview');
@@ -24,11 +25,12 @@ export default function AdminDashboard() {
         ))}
       </div>
       {tab === 'Overview' && <Overview flash={flash} flashErr={flashErr} />}
+      {tab === 'Live Pulse' && <LivePulse />}
       {tab === 'Users' && <Users flash={flash} flashErr={flashErr} />}
       {tab === 'Transactions' && <Transactions flash={flash} flashErr={flashErr} />}
       {tab === 'Mempool' && <Mempool flash={flash} flashErr={flashErr} />}
       {tab === 'Settings' && <SettingsTab flash={flash} flashErr={flashErr} />}
-      {tab === 'Audit' && <AuditTab />}
+      {tab === 'Audit' && <AuditTab flashErr={flashErr} />}
     </div>
   );
 }
@@ -40,17 +42,20 @@ function Overview({ flash, flashErr }) {
 
   const load = () => api.get('/admin/overview').then(({ data }) => setData(data)).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  useSocketEvent('chain:tick', () => load());
+  useSocketEvent('presence', (p) => setData((d) => (d ? { ...d, online: p.online } : d)));
 
   if (!data) return <p className="text-slate-400">Loading…</p>;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           ['Users', data.users, `+${data.newUsers24h} today`],
           ['Transactions', data.transactions, `${data.last24h} last 24h`],
           ['Blocks', data.blocks, ''],
           ['Supply', Number(data.supply).toLocaleString(), ''],
+          ['Online now', data.online ?? '—', 'sockets'],
         ].map(([k, v, sub]) => (
           <div key={k} className="card text-center">
             <p className="text-2xl font-black text-violet-300">{v}</p>
@@ -90,6 +95,8 @@ function Overview({ flash, flashErr }) {
         </div>
       </div>
 
+      <EvmCard flash={flash} flashErr={flashErr} />
+
       <div className="grid sm:grid-cols-2 gap-4">
         <div className="card space-y-2">
           <h3 className="font-bold">🪙 Mint tokens</h3>
@@ -99,8 +106,151 @@ function Overview({ flash, flashErr }) {
         </div>
         <div className="card space-y-2">
           <h3 className="font-bold">📢 Telegram broadcast</h3>
-          <textarea className="input" rows={3} placeholder="Announcement to all linked users…" value={broadcast} onChange={(e) => setBroadcast(e.target.value)} />
-          <button className="btn-primary w-full !py-2 text-sm" onClick={async () => { try { const { data } = await api.post('/admin/broadcast', { message: broadcast }); flash(`Broadcast sent to ${data.sent}/${data.total}`); setBroadcast(''); } catch (e) { flashErr(e); } }}>Send broadcast</button>
+          <textarea className="input" rows={3} placeholder="Announcement to all linked users + everyone online…" value={broadcast} onChange={(e) => setBroadcast(e.target.value)} />
+          <button className="btn-primary w-full !py-2 text-sm" onClick={async () => { try { const { data } = await api.post('/admin/broadcast', { message: broadcast }); flash(`Broadcast sent to ${data.sent}/${data.total} Telegram + all online`); setBroadcast(''); } catch (e) { flashErr(e); } }}>Send broadcast</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EvmCard({ flash, flashErr }) {
+  const [evm, setEvm] = useState(null);
+  const load = () => api.get('/admin/evm').then(({ data }) => setEvm(data)).catch(() => {});
+  useEffect(() => { load(); }, []);
+  useSocketEvent('anchor:confirmed', () => load());
+
+  if (!evm) return null;
+  const st = evm.status || {};
+
+  return (
+    <div className="card">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <h3 className="font-bold">🔗 Sepolia anchoring</h3>
+        <span className={`badge ${st.mode === 'post' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-500/15 text-slate-400'}`}>
+          {st.mode === 'post' ? '● posting' : '○ off'}
+        </span>
+        <button
+          className="ml-auto btn-ghost !py-1 !px-2.5 text-xs"
+          onClick={async () => { try { const { data } = await api.post('/admin/evm/retry'); flash(`Anchor worker: ${JSON.stringify(data).slice(0, 140)}`); load(); } catch (e) { flashErr(e); } }}
+        >
+          ↻ Retry pending
+        </button>
+      </div>
+      {!st.configured ? (
+        <p className="text-xs text-slate-400">
+          Not configured — set <span className="mono">EVM_RPC_URL</span> + <span className="mono">EVM_SETTLEMENT_KEY</span> in server/.env,
+          then enable <span className="mono">evmAnchorMode = post</span> in Settings. Every block gets a proof-of-existence tx on Sepolia.
+        </p>
+      ) : (
+        <div className="text-xs text-slate-400 space-y-1">
+          <p>Signer <span className="mono text-slate-200">{st.signerAddress}</span> · chain {st.chainId} (expect {st.expectedChainId}) · balance {st.balance ?? '…'} ETH</p>
+          <p>Anchor target: <span className="mono text-slate-200">{st.anchorAddress || '(self)'}</span></p>
+          {st.lastError && <p className="text-rose-400">⚠ {st.lastError}</p>}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 mt-2 text-xs">
+        {(evm.counts || []).map((c) => (
+          <span key={c._id || 'none'} className="bg-slate-800 rounded-lg px-2 py-1">{c._id || 'none'}: <b>{c.count}</b></span>
+        ))}
+      </div>
+      {(evm.recent || []).length > 0 && (
+        <div className="mt-2 space-y-1 text-xs">
+          {evm.recent.map((b) => (
+            <p key={b.number} className="mono">
+              <span className="text-slate-500">#{b.number}</span>{' '}
+              <a className="text-violet-400" target="_blank" rel="noreferrer" href={`${evm.explorer}/tx/${b.anchor.evmTxHash}`}>
+                {b.anchor.evmTxHash.slice(0, 18)}…
+              </a>{' '}
+              <span className="text-slate-500">{b.anchor.status}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LivePulse() {
+  const [hits, setHits] = useState([]);
+  const [routes, setRoutes] = useState([]);
+  const [rpm, setRpm] = useState([]);
+  const [online, setOnline] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [filter, setFilter] = useState('');
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+
+  useEffect(() => {
+    api.get('/admin/pulse').then(({ data }) => {
+      setHits(data.hits || []);
+      setRoutes(data.routes || []);
+      setRpm(data.rpm || []);
+      setOnline(data.online || 0);
+    }).catch(() => {});
+  }, []);
+
+  useSocketEvent('pulse:hit', (h) => {
+    if (pausedRef.current) return;
+    setHits((prev) => [h, ...prev].slice(0, 100));
+  });
+  useSocketEvent('presence', (p) => setOnline(p.online));
+
+  const shown = filter ? hits.filter((h) => `${h.method} ${h.path} ${h.user || ''} ${h.status}`.toLowerCase().includes(filter.toLowerCase())) : hits;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="badge bg-emerald-500/15 text-emerald-400">
+          <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 bg-emerald-400 animate-pulse" /> LIVE · every API hit
+        </span>
+        <span className="text-xs text-slate-400">🟢 {online} online</span>
+        <input className="input !w-56 !py-1.5 text-sm ml-auto" placeholder="Filter hits…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button className="btn-ghost !py-1.5 text-sm" onClick={() => setPaused(!paused)}>{paused ? '▶ Resume' : '⏸ Pause'}</button>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="card">
+          <h3 className="font-bold mb-2 text-sm">Requests / minute</h3>
+          <ResponsiveContainer width="100%" height={150}>
+            <BarChart data={rpm}>
+              <CartesianGrid stroke="#1e293b" />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#94a3b8' }} interval={4} />
+              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
+              <Bar dataKey="count" fill="#a78bfa" name="req/min" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="card">
+          <h3 className="font-bold mb-2 text-sm">Top routes (this session)</h3>
+          <div className="space-y-1 text-xs max-h-[150px] overflow-auto">
+            {routes.map((r) => (
+              <p key={r.route} className="mono break-all">
+                <span className="text-slate-500">{r.count}× {r.avgMs}ms</span> {r.route}{' '}
+                {r.errors > 0 && <span className="text-rose-400">⚠{r.errors}</span>}
+              </p>
+            ))}
+            {!routes.length && <p className="text-slate-500">No traffic yet — click around the app.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 className="font-bold mb-2 text-sm">Hit stream {paused && '(paused)'}</h3>
+        <div className="space-y-1 text-xs max-h-[420px] overflow-auto font-mono">
+          {shown.map((h) => (
+            <div key={h.id} className="bg-slate-800/60 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              <span className="text-slate-500">{new Date(h.time).toLocaleTimeString()}</span>
+              <span className="text-violet-300 font-bold">{h.method}</span>
+              <span className="text-slate-200 break-all">{h.path}</span>
+              <span className={h.status >= 500 ? 'text-rose-400' : h.status >= 400 ? 'text-amber-400' : 'text-emerald-400'}>{h.status}</span>
+              <span className="text-slate-500">{h.ms}ms</span>
+              {h.user && <span className="text-sky-300">{h.user}</span>}
+              {h.ip && <span className="text-slate-600 ml-auto">{h.ip}</span>}
+            </div>
+          ))}
+          {!shown.length && <p className="text-slate-500 font-sans">No hits yet.</p>}
         </div>
       </div>
     </div>
@@ -123,6 +273,14 @@ function Users({ flash, flashErr }) {
     } catch (e) { flashErr(e); }
   };
 
+  const exportCSV = async () => {
+    try {
+      const p = new URLSearchParams({ ...(search ? { search } : {}), ...(status ? { status } : {}) }).toString();
+      await downloadCSV(`/admin/export/users${p ? `?${p}` : ''}`, 'tbt-users.csv');
+      flash('Users CSV downloaded');
+    } catch (e) { flashErr(e); }
+  };
+
   return (
     <div className="card space-y-3">
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); load(); }}>
@@ -134,6 +292,7 @@ function Users({ flash, flashErr }) {
           <option value="banned">banned</option>
         </select>
         <button className="btn-ghost">Go</button>
+        <button type="button" className="btn-ghost" onClick={exportCSV}>⬇ CSV</button>
       </form>
       <div className="overflow-x-auto">
         <table className="table">
@@ -170,12 +329,22 @@ function Transactions({ flash, flashErr }) {
 
   const load = () => api.get('/admin/transactions', { params: { status, search, limit: 20 } }).then(({ data }) => setItems(data.items || [])).catch(() => {});
   useEffect(() => { load(); }, []); // eslint-disable-line
+  useSocketEvent('tx:approval_needed', () => load());
+  useSocketEvent('mempool:update', () => load());
 
   const act = async (hash, action) => {
     try {
       await api.post(`/admin/transactions/${hash}/${action}`);
       flash(`${action} ok`);
       load();
+    } catch (e) { flashErr(e); }
+  };
+
+  const exportCSV = async () => {
+    try {
+      const p = new URLSearchParams({ ...(status ? { status } : {}), ...(search ? { search } : {}) }).toString();
+      await downloadCSV(`/admin/export/transactions${p ? `?${p}` : ''}`, 'tbt-transactions.csv');
+      flash('Transactions CSV downloaded');
     } catch (e) { flashErr(e); }
   };
 
@@ -188,6 +357,7 @@ function Transactions({ flash, flashErr }) {
           {['pending', 'queued', 'processing', 'confirming', 'confirmed', 'failed', 'cancelled', 'rejected', 'requires_approval'].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <button className="btn-ghost">Go</button>
+        <button type="button" className="btn-ghost" onClick={exportCSV}>⬇ CSV</button>
       </form>
       {items.map((t) => (
         <div key={t.hash} className="card !p-3">
@@ -216,14 +386,16 @@ function Transactions({ flash, flashErr }) {
 function Mempool({ flash, flashErr }) {
   const [data, setData] = useState(null);
   const load = () => api.get('/admin/mempool').then(({ data }) => setData(data)).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  useSocketEvent('mempool:update', () => load());
+  useSocketEvent('block:mined', () => load());
 
   if (!data) return <p className="text-slate-400">Loading…</p>;
 
   return (
     <div className="space-y-4">
       <div className="card">
-        <h3 className="font-bold mb-2">Fair queue status — {data.stats.total} waiting</h3>
+        <h3 className="font-bold mb-2">Fair queue status — {data.stats.total} waiting <span className="text-xs font-normal text-emerald-400">● live</span></h3>
         <div className="text-sm text-slate-400 space-y-1">
           {data.stats.rows.map((r) => <p key={r._id}>{r._id}: {r.count} txs · volume {Number(r.volume).toFixed(2)}</p>)}
         </div>
@@ -285,6 +457,18 @@ function SettingsTab({ flash, flashErr }) {
     );
   };
 
+  const text = (key, label, hint) => {
+    const s = settings.find((x) => x.key === key);
+    if (!s) return null;
+    return (
+      <label className="block text-sm">
+        <span className="text-slate-300 font-medium">{label}</span>
+        <input className="input mt-1 mono" type="text" value={s.value || ''} onChange={(e) => set(key, e.target.value)} />
+        <span className="text-xs text-slate-500">{hint}</span>
+      </label>
+    );
+  };
+
   const bool = (key, label, hint) => {
     const s = settings.find((x) => x.key === key);
     if (!s) return null;
@@ -295,6 +479,8 @@ function SettingsTab({ flash, flashErr }) {
       </label>
     );
   };
+
+  const anchorMode = settings.find((x) => x.key === 'evmAnchorMode');
 
   return (
     <div className="card space-y-4">
@@ -313,19 +499,41 @@ function SettingsTab({ flash, flashErr }) {
         {bool('chainPaused', 'Pause mining (maintenance)', 'Stops block production; txs stay queued.')}
         {bool('registrationsOpen', 'Registrations open', 'Turn off to close signups.')}
       </div>
+      <h3 className="font-bold">🔗 Sepolia anchoring</h3>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="block text-sm">
+          <span className="text-slate-300 font-medium">Anchor mode</span>
+          <select className="input mt-1" value={anchorMode?.value || 'off'} onChange={(e) => set('evmAnchorMode', e.target.value)}>
+            <option value="off">off — embedded chain only</option>
+            <option value="post">post — anchor every block to Sepolia</option>
+          </select>
+          <span className="text-xs text-slate-500">Needs EVM_RPC_URL + EVM_SETTLEMENT_KEY in server/.env.</span>
+        </label>
+        {text('evmAnchorAddress', 'Anchor address', 'Sepolia destination for anchor txs (blank = signer itself).')}
+      </div>
       <button className="btn-primary" onClick={save}>Save settings</button>
     </div>
   );
 }
 
-function AuditTab() {
+function AuditTab({ flashErr }) {
   const [items, setItems] = useState([]);
   useEffect(() => {
     api.get('/admin/audit?limit=50').then(({ data }) => setItems(data.items || [])).catch(() => {});
   }, []);
+
+  const exportCSV = async () => {
+    try {
+      await downloadCSV('/admin/export/audit', 'tbt-audit.csv');
+    } catch (e) { flashErr(e); }
+  };
+
   return (
     <div className="card">
-      <h3 className="font-bold mb-3">📜 Audit log</h3>
+      <div className="flex items-center mb-3">
+        <h3 className="font-bold mr-auto">📜 Audit log</h3>
+        <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={exportCSV}>⬇ CSV</button>
+      </div>
       <div className="space-y-1.5 text-xs max-h-[500px] overflow-auto">
         {items.map((a) => (
           <div key={a._id} className="bg-slate-800/60 rounded-lg px-2.5 py-1.5">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
-import { statusBadge } from '../components/Layout';
+import { statusBadge, anchorBadge } from '../components/Layout';
+import { useSocketEvent } from '../realtime/socket';
 
 const short = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : '—');
 
@@ -10,6 +11,7 @@ export default function Explorer() {
   const [q, setQ] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [live, setLive] = useState(false);
   const [open, setOpen] = useState({}); // blockNumber -> {block, txs}
 
   const load = () => {
@@ -19,9 +21,28 @@ export default function Explorer() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 12000);
+    const t = setInterval(load, 30000);
     return () => clearInterval(t);
   }, []);
+
+  // ---- Realtime: new blocks stream in, stats tick live ----
+  useSocketEvent('hello', () => setLive(true));
+  useSocketEvent('block:mined', (b) => {
+    setLive(true);
+    setBlocks((prev) => {
+      if (prev.some((x) => x.number === b.number)) return prev;
+      return [{ number: b.number, hash: b.hash, txCount: b.txCount, timestamp: b.timestamp, anchor: { status: 'none' } }, ...prev].slice(0, 10);
+    });
+  });
+  useSocketEvent('chain:tick', (t) => {
+    setLive(true);
+    setStats((s) => (s ? { ...s, height: t.height, mempool: t.mempool } : s));
+  });
+  useSocketEvent('anchor:confirmed', ({ block, evmTxHash, chainId }) => {
+    const patch = (b) => (b.number === block ? { ...b, anchor: { ...(b.anchor || {}), status: 'confirmed', evmTxHash, evmChainId: chainId } } : b);
+    setBlocks((prev) => prev.map(patch));
+    setOpen((prev) => (prev[block] ? { ...prev, [block]: { ...prev[block], block: patch(prev[block].block) } } : prev));
+  });
 
   const search = async (e) => {
     e.preventDefault();
@@ -48,7 +69,13 @@ export default function Explorer() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-black">🔍 Block explorer</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-2xl font-black">🔍 Block explorer</h1>
+        <span className={`badge ${live ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-500/15 text-slate-400'}`}>
+          <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${live ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+          {live ? 'LIVE' : 'connecting…'}
+        </span>
+      </div>
 
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -77,7 +104,12 @@ export default function Explorer() {
         <div className="card space-y-2">
           <p className="badge bg-violet-500/15 text-violet-300">{result.type}</p>
           {result.type === 'transaction' && <TxRow tx={result.tx} />}
-          {result.type === 'block' && <BlockRow b={result.block} onToggle={() => toggleBlock(result.block.number)} />}
+          {result.type === 'block' && (
+            <div className="space-y-2">
+              <BlockRow b={result.block} onToggle={() => toggleBlock(result.block.number)} />
+              {anchorBadge(result.block)}
+            </div>
+          )}
           {result.type === 'address' && (
             <div>
               <p className="mono text-sm break-all">{q}</p>
@@ -89,11 +121,14 @@ export default function Explorer() {
       )}
 
       <div className="card">
-        <h2 className="font-bold mb-3">Latest blocks</h2>
+        <h2 className="font-bold mb-3">Latest blocks <span className="text-xs font-normal text-slate-500">(streaming live)</span></h2>
         <div className="space-y-2">
           {blocks.map((b) => (
             <div key={b.number} className="bg-slate-800/60 rounded-xl p-3">
-              <BlockRow b={b} onToggle={() => toggleBlock(b.number)} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex-1 min-w-[200px]"><BlockRow b={b} onToggle={() => toggleBlock(b.number)} /></div>
+                {anchorBadge(b)}
+              </div>
               {open[b.number] && (
                 <div className="mt-2 space-y-2 border-t border-slate-700 pt-2">
                   {(open[b.number].txs || []).map((t) => <TxRow key={t.hash} tx={t} />)}

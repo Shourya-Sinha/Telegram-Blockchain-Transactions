@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import api, { errMsg } from '../api/client';
+import api, { errMsg, downloadCSV } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { statusBadge } from '../components/Layout';
 import { TxRow } from './Explorer';
+import LiveFeed from '../components/LiveFeed';
+import { useSocketEvent } from '../realtime/socket';
 
 export default function Dashboard() {
   const { user, wallets, setWallets, refresh } = useAuth();
@@ -31,10 +33,17 @@ export default function Dashboard() {
   useEffect(() => {
     loadTxs();
     loadNotifs();
-    const t = setInterval(() => { loadTxs(); loadWallets(); }, 10000);
+    const t = setInterval(() => { loadTxs(); loadWallets(); }, 20000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  // ---- Realtime: balances + history refresh the instant things confirm ----
+  useSocketEvent('tx:confirmed', () => { loadTxs(); loadWallets(); loadNotifs(); });
+  useSocketEvent('tx:submitted', () => { loadTxs(); loadWallets(); });
+  useSocketEvent('tx:cancelled', () => { loadTxs(); loadWallets(); });
+  useSocketEvent('tx:failed', () => { loadTxs(); loadWallets(); });
+  useSocketEvent('notification:new', () => loadNotifs());
 
   const flash = (m) => { setMsg(m); setErr(''); setTimeout(() => setMsg(''), 5000); };
   const flashErr = (m) => { setErr(m); setMsg(''); };
@@ -62,6 +71,13 @@ export default function Dashboard() {
       flash('Transaction cancelled');
       loadTxs(); loadWallets();
     } catch (e) { flashErr(errMsg(e)); }
+  };
+
+  const exportCSV = async () => {
+    try {
+      await downloadCSV(`/transactions/export${filter ? `?status=${filter}` : ''}`, 'my-transactions.csv');
+      flash('CSV downloaded');
+    } catch (e) { flashErr(errMsg(e, 'Export failed')); }
   };
 
   const total = wallets.reduce((a, w) => a + (w.balance || 0), 0);
@@ -137,25 +153,31 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <h2 className="font-bold mr-auto">🧾 Transactions</h2>
-          {['', 'pending', 'confirmed', 'failed', 'requires_approval'].map((s) => (
-            <button key={s} onClick={() => setFilter(s)} className={`text-xs px-2.5 py-1 rounded-full ${filter === s ? 'bg-violet-600' : 'bg-slate-800 text-slate-300'}`}>
-              {s === '' ? 'all' : s.replace('_', ' ')}
-            </button>
-          ))}
+      <div className="grid lg:grid-cols-3 gap-4">
+        <div className="card lg:col-span-2">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <h2 className="font-bold mr-auto">🧾 Transactions</h2>
+            <button className="btn-ghost !py-1 !px-2.5 text-xs" onClick={exportCSV} title="Download as CSV">⬇ CSV</button>
+            {['', 'pending', 'confirmed', 'failed', 'requires_approval'].map((s) => (
+              <button key={s} onClick={() => setFilter(s)} className={`text-xs px-2.5 py-1 rounded-full ${filter === s ? 'bg-violet-600' : 'bg-slate-800 text-slate-300'}`}>
+                {s === '' ? 'all' : s.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {txs.map((t) => (
+              <div key={t.hash}>
+                <TxRow tx={t} />
+                {['pending', 'queued', 'requires_approval'].includes(t.status) && t.type === 'transfer' && (
+                  <button className="text-xs text-rose-400 mt-1 ml-1" onClick={() => cancel(t.hash)}>Cancel + unlock funds</button>
+                )}
+              </div>
+            ))}
+            {!txs.length && <p className="text-sm text-slate-500">No transactions. Hit the 🚰 Faucet to get test tokens, then Send.</p>}
+          </div>
         </div>
-        <div className="space-y-2">
-          {txs.map((t) => (
-            <div key={t.hash}>
-              <TxRow tx={t} />
-              {['pending', 'queued', 'requires_approval'].includes(t.status) && t.type === 'transfer' && (
-                <button className="text-xs text-rose-400 mt-1 ml-1" onClick={() => cancel(t.hash)}>Cancel + unlock funds</button>
-              )}
-            </div>
-          ))}
-          {!txs.length && <p className="text-sm text-slate-500">No transactions. Hit the 🚰 Faucet to get test tokens, then Send.</p>}
+        <div className="card">
+          <LiveFeed />
         </div>
       </div>
 

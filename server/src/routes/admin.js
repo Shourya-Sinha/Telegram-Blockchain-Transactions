@@ -14,6 +14,10 @@ const { adminMint } = require('../services/txService');
 const { mineOnce } = require('../services/chain');
 const { sendTelegramMessage } = require('../services/telegram');
 const { isAddress } = require('../middleware/validate');
+const { pulseSummary } = require('../middleware/pulse');
+const { sendCSV, dateRange, TX_COLUMNS } = require('../utils/csv');
+const { evmStatus, retryPendingAnchors, SEPOLIA_EXPLORER } = require('../services/evmAnchor');
+const { emitAll, onlineCount } = require('../realtime/socket');
 
 const router = express.Router();
 router.use(auth, admin);
@@ -64,6 +68,7 @@ router.get('/overview', async (req, res, next) => {
       mempool,
       daily,
       settings,
+      online: onlineCount(),
     });
   } catch (e) {
     next(e);
@@ -259,13 +264,20 @@ router.get('/settings', async (req, res, next) => {
 
 router.put('/settings', async (req, res, next) => {
   try {
-    const allowed = ['feePercent', 'feeMin', 'maxTxPerBlock', 'maxTxPerUserPerBlock', 'faucetAmount', 'faucetCooldownMs', 'dailySendLimit', 'largeTxApprovalThreshold', 'chainPaused', 'registrationsOpen'];
+    const allowed = ['feePercent', 'feeMin', 'maxTxPerBlock', 'maxTxPerUserPerBlock', 'faucetAmount', 'faucetCooldownMs', 'dailySendLimit', 'largeTxApprovalThreshold', 'chainPaused', 'registrationsOpen', 'evmAnchorMode', 'evmAnchorAddress'];
     const updates = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) {
-        updates[k] = req.body[k];
+        let v = req.body[k];
+        if (k === 'evmAnchorMode' && !['off', 'post'].includes(v)) {
+          return res.status(400).json({ error: 'evmAnchorMode must be off|post' });
+        }
+        if (k === 'evmAnchorAddress' && v && !isAddress(v)) {
+          return res.status(400).json({ error: 'Invalid evmAnchorAddress' });
+        }
+        updates[k] = v;
         // eslint-disable-next-line no-await-in-loop
-        await Setting.updateOne({ key: k }, { $set: { value: req.body[k] } }, { upsert: true });
+        await Setting.updateOne({ key: k }, { $set: { value: v } }, { upsert: true });
       }
     }
     await audit(req, 'settings.update', null, updates);
@@ -288,7 +300,7 @@ router.get('/audit', async (req, res, next) => {
   }
 });
 
-// POST /api/admin/broadcast — Telegram broadcast to linked users
+// POST /api/admin/broadcast — Telegram broadcast to linked users + realtime to all online
 router.post('/broadcast', async (req, res, next) => {
   try {
     const { message } = req.body || {};
@@ -300,8 +312,117 @@ router.post('/broadcast', async (req, res, next) => {
       const ok = await sendTelegramMessage(u.telegramId, `📢 <b>Announcement</b>\n${message}`);
       if (ok) sent += 1;
     }
+    emitAll('announcement', { message, time: new Date().toISOString(), online: onlineCount() });
     await audit(req, 'broadcast', null, { message: message.slice(0, 120), sent, total: users.length });
     res.json({ sent, total: users.length });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/pulse — live API-hit buffer + per-route stats + rpm (streams live via socket)
+router.get('/pulse', async (req, res) => {
+  res.json({ ...pulseSummary(), online: onlineCount() });
+});
+
+// GET /api/admin/evm — Sepolia anchoring status + recent anchors
+router.get('/evm', async (req, res, next) => {
+  try {
+    const [status, recent, counts] = await Promise.all([
+      evmStatus(),
+      Block.find({ 'anchor.evmTxHash': { $ne: null } }).sort({ number: -1 }).limit(5).lean(),
+      Block.aggregate([{ $group: { _id: '$anchor.status', count: { $sum: 1 } } }]),
+    ]);
+    res.json({ status, recent, counts, explorer: SEPOLIA_EXPLORER });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/admin/evm/retry — run the anchor retry worker now
+router.post('/evm/retry', async (req, res, next) => {
+  try {
+    const result = await retryPendingAnchors(10);
+    await audit(req, 'evm.retry', null, result);
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/admin/export/:dataset — CSV exports (users|transactions|blocks|audit)
+router.get('/export/:dataset', async (req, res, next) => {
+  try {
+    const { dataset } = req.params;
+    const range = dateRange(req.query);
+    const CAP = 10000;
+
+    if (dataset === 'users') {
+      const filter = { ...range };
+      if (req.query.status) filter.status = req.query.status;
+      if (req.query.role) filter.role = req.query.role;
+      if (req.query.search) {
+        const s = req.query.search;
+        filter.$or = [{ email: new RegExp(s, 'i') }, { name: new RegExp(s, 'i') }];
+      }
+      const rows = await User.find(filter).sort({ createdAt: -1 }).limit(CAP).lean();
+      await audit(req, 'export.users', null, { count: rows.length });
+      return sendCSV(res, 'tbt-users.csv', [
+        { key: 'name', label: 'name' },
+        { key: 'email', label: 'email' },
+        { key: 'role', label: 'role' },
+        { key: 'status', label: 'status' },
+        { key: 'telegramUsername', label: 'telegram' },
+        { key: 'dailySent', label: 'daily_sent' },
+        { key: 'dailyLimit', label: 'daily_limit' },
+        { key: 'createdAt', label: 'created_at' },
+      ], rows);
+    }
+
+    if (dataset === 'transactions') {
+      const filter = { ...range };
+      if (req.query.status) filter.status = req.query.status;
+      if (req.query.type) filter.type = req.query.type;
+      if (req.query.search) {
+        const s = req.query.search;
+        filter.$or = [{ hash: new RegExp(s, 'i') }, { fromAddress: new RegExp(s, 'i') }, { toAddress: new RegExp(s, 'i') }];
+      }
+      const rows = await Transaction.find(filter).sort({ createdAt: -1 }).limit(CAP).lean();
+      await audit(req, 'export.transactions', null, { count: rows.length });
+      return sendCSV(res, 'tbt-transactions.csv', TX_COLUMNS, rows);
+    }
+
+    if (dataset === 'blocks') {
+      const rows = await Block.find({}).sort({ number: -1 }).limit(CAP).lean();
+      await audit(req, 'export.blocks', null, { count: rows.length });
+      return sendCSV(res, 'tbt-blocks.csv', [
+        { key: 'number', label: 'number' },
+        { key: 'hash', label: 'hash' },
+        { key: 'prevHash', label: 'prev_hash' },
+        { key: 'txCount', label: 'tx_count' },
+        { key: 'miner', label: 'miner' },
+        { key: 'reward', label: 'reward' },
+        { key: 'timestamp', label: 'timestamp' },
+        { label: 'anchor_status', get: (r) => r.anchor?.status || 'none' },
+        { label: 'evm_tx', get: (r) => r.anchor?.evmTxHash || '' },
+      ], rows);
+    }
+
+    if (dataset === 'audit') {
+      const filter = { ...range };
+      if (req.query.action) filter.action = new RegExp(req.query.action, 'i');
+      const rows = await AuditLog.find(filter).sort({ createdAt: -1 }).limit(CAP).lean();
+      return sendCSV(res, 'tbt-audit.csv', [
+        { key: 'createdAt', label: 'time' },
+        { key: 'actorEmail', label: 'actor' },
+        { key: 'action', label: 'action' },
+        { key: 'target', label: 'target' },
+        { key: 'detail', label: 'detail' },
+        { key: 'ip', label: 'ip' },
+      ], rows);
+    }
+
+    return res.status(404).json({ error: 'Unknown dataset (users|transactions|blocks|audit)' });
   } catch (e) {
     next(e);
   }

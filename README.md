@@ -3,9 +3,8 @@
 A complete **MERN + Telegram bot + Admin dashboard** blockchain-transaction platform with a
 **fair mempool** — every user gets a fair chance to land in the next block, no matter how big the whales are.
 
-Built as a real-world transaction system: balance locking, idempotency, nonces, daily limits,
-admin approvals for large transfers, cancellations with refunds, failure receipts, audit logs,
-Telegram alerts, and a public block explorer.
+Live by default: **WebSocket feeds, per-hit API pulse, instant notifications, Sepolia testnet
+anchoring, and one-click CSV exports** — all included.
 
 ---
 
@@ -17,32 +16,45 @@ Telegram alerts, and a public block explorer.
 - **Send with live fee estimate** — see fee, total debit, and whether admin approval is needed
 - **🚰 Faucet** — free test tokens with cooldown (rate-limited, anti-abuse)
 - **Cancel pending txs** — funds unlock instantly, daily quota rolls back
-- **Notifications inbox** + **Telegram alerts** for confirms and incoming funds
-- **Public explorer** — blocks, transactions, addresses, search
+- **Notifications inbox** + **Telegram alerts** + **instant WebSocket toasts** for confirms/incoming funds
+- **⬇ CSV export** of your transaction history (respects active filter)
+- **Public explorer** — blocks, transactions, addresses, search — **streaming live**
 
-### ✈️ Telegram bot
-Link from Dashboard → *Link Telegram*, then in chat:
+### ⚡ Realtime (Socket.IO)
+No refresh button needed anywhere:
 
-| Command | What it does |
-|---|---|
-| `/link <CODE>` | Link your account |
-| `/balance` | All wallet balances |
-| `/address` | Your deposit address |
-| `/history` | Recent transactions |
-| `/send <0x…> <amount>` | Send from chat |
-| `/faucet` | Claim test tokens |
-| `/unlink` | Unlink Telegram |
+| Channel | Who | Events |
+|---|---|---|
+| `public` | everyone (even logged out) | `block:mined`, `tx:confirmed`, `mempool:update`, `chain:tick`, `anchor:confirmed`, `announcement` |
+| `user:{id}` | one user | `tx:submitted`, `tx:confirmed`, `tx:failed`, `tx:cancelled`, `notification:new` |
+| `admin` | all admins | `pulse:hit` (every API call), `tx:approval_needed`, `presence` (online count) |
 
-Plus automatic **✅ confirmed / 💰 received / 📢 announcement** pushes.
+- **Live feed** on Dashboard + Explorer — blocks and transfers appear the moment they're mined
+- **Live pulse** — Admin → *Live Pulse* streams every API hit (method, path, status, ms, user, IP),
+  with req/min chart, top-routes table, pause + filter
+- **Event toasts** — confirms, failures, approvals, broadcasts pop up instantly in-app
+- Balances, mempool, and approval queues **auto-refresh on socket events** (polling is only a fallback)
 
 ### 🛠 Admin dashboard (`/admin`)
-- **Overview** — users, txs, blocks, supply, status breakdown, 14-day chart, mempool snapshot
-- **⛏ Mine now** — force a block; **🪙 Mint** tokens; **📢 Broadcast** to all Telegram-linked users
-- **Users** — search, freeze / ban / activate, promote to admin, per-user daily limits
-- **Transactions** — filter, **approve / reject** large transfers, **retry** failed ones
+- **Overview** — users, txs, blocks, supply, online-now count, status breakdown, 14-day chart, mempool snapshot
+- **Live Pulse** — streaming API-hit console (see above)
+- **⛏ Mine now** — force a block; **🪙 Mint** tokens; **📢 Broadcast** to Telegram-linked users **and** everyone online
+- **Users** — search, freeze / ban / activate, promote to admin, per-user daily limits, **CSV export**
+- **Transactions** — filter, **approve / reject** large transfers, **retry** failed ones, **CSV export**
 - **Mempool** — live queue, spam-watch (top senders), drop txs (auto-refund)
-- **Settings** — fees, block capacity, **fairness cap**, faucet, daily limits, approval threshold, pause chain, close signups
-- **Audit log** — every admin action recorded with actor + IP
+- **Settings** — fees, block capacity, **fairness cap**, faucet, daily limits, approval threshold, pause chain, close signups, **Sepolia anchor mode**
+- **Audit log** — every admin action recorded with actor + IP, **CSV export**
+- **🔗 Sepolia panel** — anchor status, signer balance, recent anchors with Etherscan links, retry worker
+
+### 🔗 Sepolia testnet anchoring
+Every TBT block can be anchored to **Ethereum Sepolia** as a 0-value tx whose calldata embeds
+`block number | block hash | tx-root | timestamp` — public Proof-of-Existence verifiable on Etherscan.
+
+- `off` (default): zero-config, embedded chain only
+- `post`: anchor every block; **mining never waits** — async worker + receipt tracking + retries
+- Explorer shows a **🔗 Sepolia** badge per block linking to the anchor tx
+- Setup: get a free RPC URL (Alchemy/Infura) + funded Sepolia key → set `EVM_RPC_URL` /
+  `EVM_SETTLEMENT_KEY` → Admin → Settings → `evmAnchorMode = post`
 
 ### ⚖️ Fairness engine (the heart of this project)
 Naive fee-sorted mempools let one spammer fill every block. TBT instead:
@@ -63,34 +75,49 @@ to round-robin — never starvation. See `server/src/utils/fairness.js`.
 - **Failure receipts** with reasons, **retry** path, **confirmations counter**
 - Rate limits on auth / send / faucet, Helmet, input validation, audit trail
 
+### ✈️ Telegram bot
+Link from Dashboard → *Link Telegram*, then in chat:
+
+| Command | What it does |
+|---|---|
+| `/link <CODE>` | Link your account |
+| `/balance` | All wallet balances |
+| `/address` | Your deposit address |
+| `/history` | Recent transactions |
+| `/send <0x…> <amount>` | Send from chat |
+| `/faucet` | Claim test tokens |
+| `/unlink` | Unlink Telegram |
+
+Plus automatic **✅ confirmed / 💰 received / 📢 announcement** pushes.
+
 ---
 
 ## 🏗 Architecture
 
 ```
 Telegram-Blockchain-Transactions/
-├── server/                 # Express + Mongoose + miner + Telegram bot
+├── server/                 # Express + Mongoose + miner + Telegram bot + Socket.IO
 │   └── src/
 │       ├── config/         # env, db
-│       ├── models/         # User, Wallet, Transaction, Block, Setting, AuditLog, Notification
+│       ├── models/         # User, Wallet, Transaction, Block(+anchor), Setting, AuditLog, Notification
 │       ├── routes/         # auth, wallets, transactions, blocks(explorer), admin, health
-│       ├── services/       # chain(miner), mempool, txService, stats/settings, telegram
+│       ├── services/       # chain(miner), mempool, txService, stats, telegram, evmAnchor
+│       ├── realtime/       # socket.io rooms + emitters
+│       ├── middleware/     # auth, admin, rateLimit, pulse(api-hit stream), errorHandler
 │       ├── bot/            # Telegraf bot
-│       └── utils/          # fairness engine, jwt, crypto, paginate
-├── client/                 # React 18 + Vite + Tailwind + Recharts
+│       └── utils/          # fairness engine, jwt, crypto, paginate, csv
+├── client/                 # React 18 + Vite + Tailwind + Recharts + socket.io-client
 │   └── src/
+│       ├── realtime/       # socket singleton + useSocketEvent hook
 │       ├── pages/          # Landing, Login, Register, Dashboard, Explorer
-│       └── pages/admin/    # AdminDashboard (6 tabs)
+│       └── pages/admin/    # AdminDashboard (7 tabs incl. Live Pulse)
 └── docker-compose.yml      # mongo + server + client
 ```
 
 **How a transfer flows:** `POST /transactions/send` → validate → lock balance → mempool (`pending`)
-→ miner ticks every `BLOCK_TIME_MS` → fair-pick batch → settle debits/credits → append **Block**
-→ mark `confirmed` → notify sender + receiver (in-app + Telegram).
-
-> The embedded chain is a purpose-built ledger (mined blocks, hashes, nonces, receipts) that runs
-> with zero external dependencies — perfect for demos and tests. `EVM_RPC_URL` / `EVM_SETTLEMENT_KEY`
-> envs are reserved for anchoring settlement hashes to a real EVM testnet (Sepolia) as a next step.
+→ socket `tx:submitted` → miner ticks every `BLOCK_TIME_MS` → fair-pick batch → settle debits/credits
+→ append **Block** → socket `block:mined` + `tx:confirmed` → notify sender + receiver (in-app toast +
+Telegram) → async **Sepolia anchor** → `anchor:confirmed`.
 
 ---
 
@@ -119,18 +146,25 @@ npm run seed --prefix server
 
 ### 4) Run (two terminals, or `npm run dev` from root)
 ```bash
-npm run dev --prefix server   # API :5000
+npm run dev --prefix server   # API :5000 (+ socket.io)
 npm run dev --prefix client   # Web :5173
 ```
 
-Open **http://localhost:5173** → Register → Faucet → Send → watch it confirm in ~10s → link Telegram → explore `/admin`.
+Open **http://localhost:5173** → Register → Faucet → Send → watch it confirm live (~10s, no refresh) →
+link Telegram → explore `/admin` → open **Live Pulse** and click around to see every hit stream in.
 
 ### 5) Telegram bot (optional, 2 min)
 1. Chat with [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
 2. Put `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` in `server/.env`, restart server
 3. Dashboard → *Link Telegram* → open the deep link → `/balance` 🎉
 
-### 6) Docker
+### 6) Sepolia anchoring (optional)
+1. Free RPC URL from Alchemy/Infura (Sepolia) → `EVM_RPC_URL`
+2. Export a Sepolia-funded private key (testnet only!) → `EVM_SETTLEMENT_KEY`
+3. Restart server → Admin → Settings → `evmAnchorMode = post` → Save
+4. Mine/send a tx → Overview shows the anchor → Explorer block gets a 🔗 Sepolia badge
+
+### 7) Docker
 ```bash
 docker compose up --build
 # client :5173 · server :5000 · mongo :27017
@@ -152,18 +186,24 @@ docker compose up --build
 | `GET /api/transactions/estimate?amount=` | user | Fee preview |
 | `POST /api/transactions/send` | user | Submit transfer (`Idempotency-Key` header supported) |
 | `GET /api/transactions/mine` | user | My history (`?status=&type=`) |
+| `GET /api/transactions/export` | user | **My history as CSV** |
 | `POST /api/transactions/:hash/cancel` | user | Cancel + unlock |
 | `GET /api/blocks` · `/api/blocks/:n` · `/api/blocks/search?q=` · `/api/blocks/explorer/stats` | – | Public explorer |
-| `GET /api/admin/overview` | admin | Stats + chart data |
+| `GET /api/admin/overview` | admin | Stats + chart data + online count |
+| `GET /api/admin/pulse` | admin | **API-hit buffer + route stats + rpm** (live via socket) |
 | `GET|PATCH /api/admin/users…` | admin | Manage users |
 | `GET /api/admin/transactions…` | admin | All txs |
 | `POST /api/admin/transactions/:hash/{approve,reject,retry}` | admin | Moderate txs |
 | `GET /api/admin/mempool` · `DELETE /api/admin/mempool/:hash` | admin | Queue control |
 | `POST /api/admin/mine` · `POST /api/admin/mint` | admin | Mining + supply |
-| `GET|PUT /api/admin/settings` | admin | Chain policy |
+| `GET|PUT /api/admin/settings` | admin | Chain policy (+ anchor mode) |
 | `GET /api/admin/audit` | admin | Audit log |
-| `POST /api/admin/broadcast` | admin | Telegram announcement |
+| `GET /api/admin/evm` · `POST /api/admin/evm/retry` | admin | **Sepolia status + retry worker** |
+| `GET /api/admin/export/:dataset` | admin | **CSV: users\|transactions\|blocks\|audit** (`?from=&to=&status=&search=`) |
+| `POST /api/admin/broadcast` | admin | Telegram + realtime announcement |
 | `GET /api/health` | – | Health check |
+
+**WebSocket** (`/socket.io`, optional `auth.token`): see the Realtime table above.
 
 ---
 
@@ -181,22 +221,25 @@ docker compose up --build
 | `LARGE_TX_APPROVAL_THRESHOLD` | 5000 | 0 = disable approvals |
 | `TELEGRAM_BOT_TOKEN` | – | Enables bot + alerts |
 | `WALLET_ENCRYPTION_KEY` | derived | 64-hex AES key (set in prod!) |
+| `EVM_RPC_URL` / `EVM_SETTLEMENT_KEY` | – | Sepolia RPC + funded testnet key |
+| `EVM_ANCHOR_MODE` | off | `off` \| `post` (also live in Settings) |
+| `EVM_CHAIN_ID` | 11155111 | Expected EVM chain id |
+| `EVM_ANCHOR_ADDRESS` | – | Anchor destination (blank = self) |
 | `SEED_ADMIN_*` | admin@tbt.local | Seed credentials |
 
-All of these are also **live-editable from Admin → Settings** (DB overrides env after first boot).
+Chain-policy keys are also **live-editable from Admin → Settings** (DB overrides env after first boot).
 
 ---
 
 ## 🧪 Try the fairness yourself
 1. Register two users (normal + incognito window), claim faucet on both
 2. User A submits 10 transfers; user B submits 1 right after
-3. Watch the next block: B's tx confirms **alongside** A's first 2 — B is never pushed out
-4. Admin → Mempool shows the queue; Explorer shows the interleaved block
+3. Watch the next block stream into the Explorer **live**: B's tx confirms **alongside** A's first 2 — B is never pushed out
+4. Admin → Mempool shows the queue; Admin → Live Pulse shows every API hit as it happens
 
 ## 🗺 Roadmap ideas
-- EVM Sepolia anchoring of block hashes (envs already reserved)
-- WebSocket live feed for mempool/blocks · CSV export · 2FA/TOTP · Telegram Login Widget SSO
-- Automated test suite (miner + fairness property tests)
+- WebSocket-gated rate-limit dashboard · CSV export of pulse data · 2FA/TOTP · Telegram Login Widget SSO
+- Mainnet-ready anchor contract (batch roots) · automated test suite (miner + fairness property tests)
 
 ## ⚠️ Disclaimer
 Testnet demo software — tokens have no value. Custodial keys are AES-encrypted but this is **not**

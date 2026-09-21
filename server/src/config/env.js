@@ -27,6 +27,9 @@ module.exports = {
   WALLET_ENCRYPTION_KEY: process.env.WALLET_ENCRYPTION_KEY || '',
   EVM_RPC_URL: process.env.EVM_RPC_URL || '',
   EVM_SETTLEMENT_KEY: process.env.EVM_SETTLEMENT_KEY || '',
+  EVM_ANCHOR_MODE: process.env.EVM_ANCHOR_MODE || 'off',
+  EVM_CHAIN_ID: num(process.env.EVM_CHAIN_ID, 11155111),
+  EVM_ANCHOR_ADDRESS: process.env.EVM_ANCHOR_ADDRESS || '',
   SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL || 'admin@tbt.local',
   SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD || 'Admin123!',
 };
