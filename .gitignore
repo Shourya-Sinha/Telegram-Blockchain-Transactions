@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+.env
+server/.env
+client/.env
+client/dist/
+coverage/
+*.pem

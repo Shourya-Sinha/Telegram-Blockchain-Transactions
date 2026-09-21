@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { @apply bg-slate-950 text-slate-100; font-family: ui-sans-serif, system-ui, sans-serif; }
+.card { @apply bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl; }
+.input { @apply w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 outline-none focus:border-violet-500 placeholder:text-slate-500; }
+.btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed; }
+.btn-primary { @apply btn bg-violet-600 hover:bg-violet-500 text-white; }
+.btn-ghost { @apply btn bg-slate-800 hover:bg-slate-700 text-slate-200; }
+.btn-danger { @apply btn bg-rose-600 hover:bg-rose-500 text-white; }
+.btn-success { @apply btn bg-emerald-600 hover:bg-emerald-500 text-white; }
+.badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold; }
+.table { @apply w-full text-sm; }
+.table th { @apply text-left text-slate-400 font-medium pb-2 pr-4; }
+.table td { @apply py-2.5 pr-4 border-t border-slate-800 align-top; }
+.mono { font-family: ui-monospace, monospace; }
