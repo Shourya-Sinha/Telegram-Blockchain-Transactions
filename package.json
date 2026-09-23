@@ -1,0 +1,19 @@
+{
+  "name": "telegram-red-envelope",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Custodial Telegram Mini App crypto red envelope and wallet platform",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspace=@red-envelope/shared && npm run build --workspace=@red-envelope/backend && npm run build --workspace=@red-envelope/frontend && npm run build --workspace=@red-envelope/admin",
+    "dev": "concurrently -n backend,frontend,admin -c blue,green,magenta \"npm run dev --workspace=@red-envelope/backend\" \"npm run dev --workspace=@red-envelope/frontend\" \"npm run dev --workspace=@red-envelope/admin\"",
+    "db:generate": "npm run prisma:generate --workspace=@red-envelope/backend",
+    "db:migrate": "npm run prisma:migrate --workspace=@red-envelope/backend",
+    "db:seed": "npm run prisma:seed --workspace=@red-envelope/backend",
+    "lint": "npm run typecheck --workspace=@red-envelope/shared && npm run typecheck --workspace=@red-envelope/backend && npm run typecheck --workspace=@red-envelope/frontend && npm run typecheck --workspace=@red-envelope/admin"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": { "node": ">=20" }
+}
