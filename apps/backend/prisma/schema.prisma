@@ -1,0 +1,155 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserStatus { ACTIVE BANNED }
+enum LedgerType { DEPOSIT CLAIM WITHDRAWAL FEE REFUND TRANSFER }
+enum LedgerDirection { CREDIT DEBIT }
+enum EnvelopeMode { RANDOM EQUAL }
+enum EnvelopeStatus { ACTIVE COMPLETED EXPIRED REFUNDED }
+enum Chain { TRC20 }
+enum WithdrawalStatus { QUEUED PROCESSING BROADCAST CONFIRMING COMPLETED FAILED REJECTED }
+enum DepositStatus { PENDING CONFIRMED FAILED }
+enum AdminRole { SUPER_ADMIN FINANCE SUPPORT }
+
+model User {
+  id          String       @id @default(uuid()) @db.Uuid
+  telegramId  BigInt       @unique
+  username    String?
+  depositAddress String? @unique
+  firstName   String
+  createdAt   DateTime     @default(now())
+  isAdmin     Boolean      @default(false)
+  status      UserStatus   @default(ACTIVE)
+  wallet      WalletAccount?
+  ledger      LedgerEntry[]
+  envelopes   RedEnvelope[] @relation("EnvelopeSender")
+  claims      RedEnvelopeClaim[]
+  withdrawals Withdrawal[]
+  deposits    Deposit[]
+  @@index([createdAt])
+  @@index([status])
+}
+
+model WalletAccount {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @db.Uuid
+  availableMinor  BigInt   @default(0)
+  lockedMinor     BigInt   @default(0)
+  version         Int      @default(0)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([availableMinor])
+}
+
+model LedgerEntry {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @db.Uuid
+  amountMinor     BigInt
+  type            LedgerType
+  direction       LedgerDirection
+  balanceAfterMinor BigInt
+  referenceType   String
+  referenceId     String
+  createdAt       DateTime        @default(now())
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model RedEnvelope {
+  id             String          @id @default(uuid()) @db.Uuid
+  senderId       String          @db.Uuid
+  groupId        BigInt
+  messageId      Int
+  totalMinor     BigInt
+  remainingMinor BigInt
+  totalSlots     Int
+  remainingSlots Int
+  mode           EnvelopeMode
+  status         EnvelopeStatus   @default(ACTIVE)
+  expiresAt      DateTime
+  createdAt      DateTime        @default(now())
+  sender         User            @relation("EnvelopeSender", fields: [senderId], references: [id], onDelete: Restrict)
+  claims         RedEnvelopeClaim[]
+  @@index([groupId, createdAt])
+  @@index([status, expiresAt])
+}
+
+model RedEnvelopeClaim {
+  id         String       @id @default(uuid()) @db.Uuid
+  envelopeId String       @db.Uuid
+  userId     String       @db.Uuid
+  amountMinor BigInt
+  claimedAt  DateTime     @default(now())
+  envelope   RedEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([envelopeId, userId])
+  @@index([userId, claimedAt])
+}
+
+model Withdrawal {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  amountMinor    BigInt
+  feeMinor       BigInt
+  toAddress      String
+  chain          Chain            @default(TRC20)
+  txHash         String?
+  status         WithdrawalStatus @default(QUEUED)
+  idempotencyKey  String           @unique
+  attempts       Int              @default(0)
+  createdAt      DateTime         @default(now())
+  user           User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Deposit {
+  id            String        @id @default(uuid()) @db.Uuid
+  txHash        String        @unique
+  userId        String        @db.Uuid
+  amountMinor   BigInt
+  fromAddress   String
+  status        DepositStatus @default(PENDING)
+  confirmations Int           @default(0)
+  createdAt     DateTime      @default(now())
+  user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@index([status, createdAt])
+}
+
+model AdminUser {
+  id         String    @id @default(uuid()) @db.Uuid
+  username   String    @unique
+  passwordHash String
+  role       AdminRole @default(SUPPORT)
+  mfaSecret  String?
+  createdAt  DateTime  @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+model GroupSetting {
+  id                String   @id @default(uuid()) @db.Uuid
+  chatId            BigInt   @unique
+  enabled           Boolean  @default(true)
+  minAccountAgeDays Int      @default(0)
+  minMessages       Int      @default(0)
+  maxClaimsPerDay   Int      @default(10)
+}

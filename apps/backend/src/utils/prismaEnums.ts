@@ -1,0 +1,14 @@
+export type AdminRole = 'SUPER_ADMIN' | 'FINANCE' | 'SUPPORT';
+export const AdminRole = { SUPER_ADMIN: 'SUPER_ADMIN', FINANCE: 'FINANCE', SUPPORT: 'SUPPORT' } as const;
+export type DepositStatus = 'PENDING' | 'CONFIRMED' | 'FAILED';
+export const DepositStatus = { PENDING: 'PENDING', CONFIRMED: 'CONFIRMED', FAILED: 'FAILED' } as const;
+export type LedgerType = 'DEPOSIT' | 'CLAIM' | 'WITHDRAWAL' | 'FEE' | 'REFUND' | 'TRANSFER';
+export const LedgerType = { DEPOSIT: 'DEPOSIT', CLAIM: 'CLAIM', WITHDRAWAL: 'WITHDRAWAL', FEE: 'FEE', REFUND: 'REFUND', TRANSFER: 'TRANSFER' } as const;
+export type LedgerDirection = 'CREDIT' | 'DEBIT';
+export const LedgerDirection = { CREDIT: 'CREDIT', DEBIT: 'DEBIT' } as const;
+export type EnvelopeMode = 'RANDOM' | 'EQUAL';
+export const EnvelopeMode = { RANDOM: 'RANDOM', EQUAL: 'EQUAL' } as const;
+export type EnvelopeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'REFUNDED';
+export const EnvelopeStatus = { ACTIVE: 'ACTIVE', COMPLETED: 'COMPLETED', EXPIRED: 'EXPIRED', REFUNDED: 'REFUNDED' } as const;
+export type WithdrawalStatus = 'QUEUED' | 'PROCESSING' | 'BROADCAST' | 'CONFIRMING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
+export const WithdrawalStatus = { QUEUED: 'QUEUED', PROCESSING: 'PROCESSING', BROADCAST: 'BROADCAST', CONFIRMING: 'CONFIRMING', COMPLETED: 'COMPLETED', FAILED: 'FAILED', REJECTED: 'REJECTED' } as const;
