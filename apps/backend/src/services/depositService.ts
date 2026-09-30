@@ -4,8 +4,12 @@ import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { creditWallet, writeAudit } from './ledgerService';
 import { type IncomingTransfer } from './tronGateway';
+import { AppError } from '../utils/errors';
 
 export async function recordIncomingTransfer(userId: string, transfer: IncomingTransfer) {
+  if (!config.chainOperationsEnabled || config.depositMode !== 'unique') {
+    throw new AppError(403, 'Blockchain deposits are disabled outside unique-address real-funds mode', 'DEPOSITS_DISABLED');
+  }
   return prisma.$transaction(async (tx: Transaction) => {
     const existing = await tx.deposit.findUnique({ where: { txHash: transfer.txHash } });
     if (existing?.status === DepositStatus.CONFIRMED) return existing;

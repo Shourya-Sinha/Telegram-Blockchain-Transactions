@@ -17,6 +17,7 @@ async function lockWithdrawal(tx: Transaction, id: string) {
 }
 
 export async function createWithdrawal(userId: string, input: RequestInput) {
+  if (!config.chainOperationsEnabled) throw new AppError(403, 'Blockchain withdrawals are disabled in test mode', 'TEST_MODE');
   const parsed = withdrawalRequestSchema.parse(input);
   const amountMinor = parseUsdtToMinor(parsed.amount);
   if (amountMinor < config.withdrawal.minMinor) throw new AppError(400, `Minimum withdrawal is ${config.withdrawal.minMinor / 1_000_000n} USDT`, 'WITHDRAWAL_TOO_SMALL');
@@ -44,6 +45,7 @@ export async function createWithdrawal(userId: string, input: RequestInput) {
 }
 
 export async function approveWithdrawal(id: string, adminId: string, ipAddress?: string) {
+  if (!config.chainOperationsEnabled) throw new AppError(403, 'Blockchain withdrawals are disabled in test mode', 'TEST_MODE');
   const updated = await prisma.$transaction(async (tx: Transaction) => {
     const withdrawal = await lockWithdrawal(tx, id);
     if (!withdrawal) throw new AppError(404, 'Withdrawal not found', 'WITHDRAWAL_NOT_FOUND');
@@ -57,6 +59,7 @@ export async function approveWithdrawal(id: string, adminId: string, ipAddress?:
 }
 
 export async function retryWithdrawal(id: string, adminId: string, ipAddress?: string) {
+  if (!config.chainOperationsEnabled) throw new AppError(403, 'Blockchain withdrawals are disabled in test mode', 'TEST_MODE');
   const updated = await prisma.$transaction(async (tx: Transaction) => {
     const withdrawal = await lockWithdrawal(tx, id);
     if (!withdrawal) throw new AppError(404, 'Withdrawal not found', 'WITHDRAWAL_NOT_FOUND');
@@ -70,6 +73,7 @@ export async function retryWithdrawal(id: string, adminId: string, ipAddress?: s
 }
 
 export async function processWithdrawal(withdrawalId: string): Promise<void> {
+  if (!config.chainOperationsEnabled) throw new AppError(403, 'Refusing to broadcast a blockchain withdrawal in test mode', 'TEST_MODE');
   const intent = await prisma.$transaction(async (tx: Transaction) => {
     const withdrawal = await lockWithdrawal(tx, withdrawalId);
     if (!withdrawal) throw new AppError(404, 'Withdrawal not found', 'WITHDRAWAL_NOT_FOUND');

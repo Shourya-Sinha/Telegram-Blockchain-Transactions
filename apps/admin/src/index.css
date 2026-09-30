@@ -17,6 +17,9 @@
 .envelope-history .panel-head { padding: 18px 18px 4px; }
 @media (max-width: 1000px) { .envelope-admin-grid { grid-template-columns: 1fr; } }
 
+.workspace-pill.test { color: #edca83; border-color: #5b492d; background: #2a2319; }
+.workspace-pill.test .online-dot { background: #e5bb6b; box-shadow: 0 0 9px #e5bb6b; }
+.workspace-pill.real { color: #75ddb1; border-color: #285941; background: #112b24; }
 .row-actions { display: flex; gap: 6px; }
 .user-detail-panel { margin-top: 15px; padding: 22px; }
 .user-detail-panel > .panel-head { align-items: center; margin-bottom: 18px; }

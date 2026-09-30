@@ -99,6 +99,8 @@ This repository includes an explicitly guarded development helper so the full in
 
 ```dotenv
 NODE_ENV=development
+FUNDS_MODE=test
+DEPOSIT_MODE=disabled
 ALLOW_DEV_CREDIT=true
 ```
 
@@ -113,7 +115,22 @@ Then, after the treasury user has sent `/start`, use either method:
 
 The admin control is restricted to `SUPER_ADMIN` and `FINANCE` roles, accepts at most 10,000 USDT per action, and is hard-disabled whenever `NODE_ENV=production`. Every credit atomically increases the available internal balance, creates a `TRANSFER / CREDIT` ledger entry with reference type `DEV_CREDIT`, and writes `DEV_WALLET_CREDITED` to the admin audit log with the operator, reason, IP address, previous balance, and new balance.
 
-This is **not a blockchain transaction** and adds no real USDT to the hot wallet. It creates an unbacked test liability solely for local testing. Never enable it in staging or production.
+This is **not a blockchain transaction** and adds no real USDT to the hot wallet. In `FUNDS_MODE=test`, blockchain deposit scanners, withdrawal workers, user deposits, and user withdrawals are disabled, so test liabilities cannot drain a real wallet.
+
+### Switching to real funds
+
+Funds mode is deliberately controlled by the deployment environment—not by an admin-panel switch. Allowing a logged-in operator to turn test balances into withdrawable real liabilities would create a critical wallet-drain risk. The admin panel clearly displays **TEST MODE** or **REAL FUNDS**, but changing modes requires an reviewed configuration change and backend restart.
+
+A real deployment requires:
+
+```dotenv
+NODE_ENV=production
+FUNDS_MODE=real
+DEPOSIT_MODE=unique
+ALLOW_DEV_CREDIT=false
+```
+
+It also requires all production secrets and TRON wallet settings. Startup fails closed if real mode is incomplete, if test credit is enabled in production, or if deposits are not configured for unique addresses. `DEPOSIT_MODE=unique` uses each user's `User.depositAddress`; addresses must first be provisioned by reviewed self-custody/key-management infrastructure or a custody provider. The shared hot-wallet address is never returned as a production user deposit address.
 
 ### Production deposit warning
 

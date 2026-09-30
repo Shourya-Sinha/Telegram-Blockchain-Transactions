@@ -17,8 +17,23 @@ userRouter.use(telegramAuth);
 
 userRouter.get('/me', async (req, res) => {
   const user = req.telegramUser!;
-  const wallet = await getWalletSummary(user.id);
-  res.json(jsonSafe({ id: user.id, telegramId: user.telegramId, username: user.username, firstName: user.firstName, isAdmin: user.isAdmin, wallet, depositAddress: config.tron.hotWalletAddress }));
+  const [wallet, account] = await Promise.all([
+    getWalletSummary(user.id),
+    prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } })
+  ]);
+  const depositAddress = account?.depositAddress;
+  res.json(jsonSafe({
+    id: user.id,
+    telegramId: user.telegramId,
+    username: user.username,
+    firstName: user.firstName,
+    isAdmin: user.isAdmin,
+    wallet,
+    fundsMode: config.fundsMode,
+    depositsEnabled: config.fundsMode === 'real' && config.depositMode === 'unique' && Boolean(depositAddress),
+    withdrawalsEnabled: config.chainOperationsEnabled,
+    depositAddress: config.fundsMode === 'real' && config.depositMode === 'unique' ? depositAddress : undefined
+  }));
 });
 
 userRouter.get('/wallet', async (req, res) => {
@@ -31,8 +46,17 @@ userRouter.get('/ledger', async (req, res) => {
 });
 userRouter.get('/history', async (req, res) => res.json(jsonSafe(await getLedger(req.telegramUser!.id, 50))));
 
-userRouter.get('/deposit/address', async (_req, res) => {
-  res.json({ address: config.tron.hotWalletAddress, chain: 'TRC20', confirmations: config.tron.confirmations });
+userRouter.get('/deposit/address', async (req, res) => {
+  if (config.fundsMode !== 'real') {
+    res.status(403).json({ error: 'Blockchain deposits are disabled in test mode. Ask an admin to add test USDT.', code: 'TEST_MODE' });
+    return;
+  }
+  const user = await prisma.user.findUnique({ where: { id: req.telegramUser!.id }, select: { depositAddress: true } });
+  if (config.depositMode !== 'unique' || !user?.depositAddress) {
+    res.status(503).json({ error: 'A unique TRON deposit address has not been provisioned for this account.', code: 'DEPOSIT_ADDRESS_UNAVAILABLE' });
+    return;
+  }
+  res.json({ address: user.depositAddress, chain: 'TRC20', confirmations: config.tron.confirmations });
 });
 
 userRouter.get('/groups', async (req, res) => {

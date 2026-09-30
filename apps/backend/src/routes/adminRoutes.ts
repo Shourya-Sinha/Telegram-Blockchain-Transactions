@@ -106,7 +106,9 @@ adminRouter.get('/dashboard', async (req, res) => {
     prisma.ledgerEntry.findMany({ where: { createdAt: { gte: new Date(Date.now() - 14 * 86400000) }, type: { in: [LedgerType.DEPOSIT, LedgerType.WITHDRAWAL] } }, select: { type: true, amountMinor: true, createdAt: true } })
   ]);
   let hotWalletBalance = 0n;
-  try { hotWalletBalance = await tronGateway.getUsdtBalance(); } catch (error) { console.error('[dashboard-hot-wallet]', error); }
+  if (config.chainOperationsEnabled) {
+    try { hotWalletBalance = await tronGateway.getUsdtBalance(); } catch (error) { console.error('[dashboard-hot-wallet]', error); }
+  }
   const totalLiabilityMinor = (walletLiability._sum.availableMinor ?? 0n) + (walletLiability._sum.lockedMinor ?? 0n);
   const dayMap = new Map<string, { deposits: bigint; withdrawals: bigint }>();
   for (let offset = 13; offset >= 0; offset -= 1) {
@@ -123,7 +125,12 @@ adminRouter.get('/users', async (req, res) => {
   res.json(jsonSafe(users));
 });
 adminRouter.get('/testing', (_req, res) => {
-  res.json({ testCreditEnabled: config.allowDevCredit });
+  res.json({
+    fundsMode: config.fundsMode,
+    depositMode: config.depositMode,
+    chainOperationsEnabled: config.chainOperationsEnabled,
+    testCreditEnabled: config.allowDevCredit
+  });
 });
 adminRouter.post('/users/:id/test-credit', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => {
   if (!config.allowDevCredit) {
