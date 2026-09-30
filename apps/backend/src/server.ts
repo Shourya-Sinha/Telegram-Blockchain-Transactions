@@ -27,10 +27,32 @@ app.use('/api/admin', adminRouter);
 app.use('/api', userRouter);
 
 const bot = config.botToken ? createTelegramBot() : null;
+
+// app.post('/telegram/webhook', async (req, res, next) => {
+//   if (!bot) { res.status(503).json({ error: 'Telegram bot is not configured' }); return; }
+//   if (req.header('x-telegram-bot-api-secret-token') !== config.telegramWebhookSecret) { res.status(401).json({ error: 'Invalid webhook secret' }); return; }
+//   try { await bot.handleUpdate(req.body); res.sendStatus(200); } catch (error) { next(error); }
+// });
 app.post('/telegram/webhook', async (req, res, next) => {
-  if (!bot) { res.status(503).json({ error: 'Telegram bot is not configured' }); return; }
-  if (req.header('x-telegram-bot-api-secret-token') !== config.telegramWebhookSecret) { res.status(401).json({ error: 'Invalid webhook secret' }); return; }
-  try { await bot.handleUpdate(req.body); res.sendStatus(200); } catch (error) { next(error); }
+  if (!bot) {
+    res.status(503).json({ error: 'Telegram bot is not configured' });
+    return;
+  }
+
+  if (
+    req.header('x-telegram-bot-api-secret-token') !==
+    config.telegramWebhookSecret
+  ) {
+    res.status(401).json({ error: 'Invalid webhook secret' });
+    return;
+  }
+
+  try {
+    await bot.handleUpdate(req.body);
+    res.sendStatus(200);
+  } catch (error) {
+    next(error);
+  }
 });
 
 const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
@@ -47,14 +69,44 @@ const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
 };
 app.use(errorHandler);
 
+// if (config.nodeEnv !== 'test') {
+//   startWorkers();
+//   const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
+//   if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
+//     void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
+//   }
+//   const shutdown = () => { server.close(() => process.exit(0)); };
+//   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
+// }
 if (config.nodeEnv !== 'test') {
   startWorkers();
-  const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
-  if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
-    void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
-  }
-  const shutdown = () => { server.close(() => process.exit(0)); };
-  process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
-}
 
+  const server = app.listen(config.port, '0.0.0.0', async () => {
+    console.log(`[backend] listening on 0.0.0.0:${config.port}`);
+
+    if (!bot) return;
+
+    try {
+      await bot.init();
+      console.log('[telegram] bot initialized');
+
+      if (process.env.TELEGRAM_WEBHOOK_URL) {
+        await bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, {
+          secret_token: config.telegramWebhookSecret
+        });
+
+        console.log('[telegram] webhook configured');
+      }
+    } catch (error) {
+      console.error('[telegram] startup failed', error);
+    }
+  });
+
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+  };
+
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+}
 export { app };

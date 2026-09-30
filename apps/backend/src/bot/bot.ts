@@ -26,10 +26,24 @@ export function createTelegramBot(): Bot {
     await next();
   });
 
+  // bot.command('start', async (ctx) => {
+  //   await ensureWalletForTelegram(telegramIdentity(ctx));
+  //   await ctx.reply('Welcome to Red Envelope Wallet 🧧\nYour funds are held securely in a custodial ledger. Use /balance to get started.', { parse_mode: 'HTML' });
+  // });
   bot.command('start', async (ctx) => {
-    await ensureWalletForTelegram(telegramIdentity(ctx));
-    await ctx.reply('Welcome to Red Envelope Wallet 🧧\nYour funds are held securely in a custodial ledger. Use /balance to get started.', { parse_mode: 'HTML' });
-  });
+  await ensureWalletForTelegram(telegramIdentity(ctx));
+
+  const keyboard = new InlineKeyboard()
+    .webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl);
+
+  await ctx.reply(
+    'Welcome to Red Envelope Wallet 🧧\n\nYour custodial wallet is ready. Tap below to open the Mini App.',
+    {
+      parse_mode: 'HTML',
+      reply_markup: keyboard
+    }
+  );
+});
   bot.command('help', async (ctx) => ctx.reply(['/balance — view your wallet', '/deposit — get the TRC20 deposit address', '/withdraw — open a withdrawal request', '/history — recent ledger activity', '/redpacket <amount> <count> — create a red envelope in a group'].join('\n')));
   bot.command('balance', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
@@ -40,10 +54,19 @@ export function createTelegramBot(): Bot {
     await ensureWalletForTelegram(telegramIdentity(ctx));
     await ctx.reply(`Send USDT on TRC20 to:\n<code>${config.tron.hotWalletAddress || 'Deposit address is being provisioned'}</code>\n\nDeposits are credited after ${config.tron.confirmations} confirmations. Always verify the network.`, { parse_mode: 'HTML' });
   });
+  // bot.command('withdraw', async (ctx) => {
+  //   const keyboard = new InlineKeyboard().url('Open Wallet', config.publicAppUrl);
+  //   await ctx.reply('Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.', { reply_markup: keyboard });
+  // });
   bot.command('withdraw', async (ctx) => {
-    const keyboard = new InlineKeyboard().url('Open Wallet', config.publicAppUrl);
-    await ctx.reply('Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.', { reply_markup: keyboard });
-  });
+  const keyboard = new InlineKeyboard()
+    .webApp('🧧 Open Wallet', config.publicAppUrl);
+
+  await ctx.reply(
+    'Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.',
+    { reply_markup: keyboard }
+  );
+});
   bot.command('history', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
