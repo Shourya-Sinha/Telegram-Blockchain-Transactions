@@ -21,6 +21,7 @@ declare global {
     exitFullscreen?: () => void;
     close: () => void;
     enableClosingConfirmation: () => void;
+    enableVerticalSwipes?: () => void;
     disableVerticalSwipes?: () => void;
     isClosingConfirmationEnabled?: boolean;
     setHeaderColor?: (color: string) => void;

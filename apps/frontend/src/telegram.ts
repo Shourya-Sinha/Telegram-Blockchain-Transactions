@@ -15,18 +15,6 @@ function setViewportVariables(app?: TelegramWebApp): void {
   root.style.setProperty('--app-safe-left', `${Math.max(safeArea?.left ?? 0, contentSafeArea?.left ?? 0)}px`);
 }
 
-function requestTelegramFullscreen(app: TelegramWebApp): void {
-  // expand() supports old Telegram clients; requestFullscreen() removes the
-  // remaining Telegram header on clients that implement Mini Apps 8.0+.
-  app.expand();
-  if (!app.requestFullscreen || app.isFullscreen) return;
-  try {
-    app.requestFullscreen();
-  } catch {
-    // Older clients still stay in the maximum height provided by expand().
-  }
-}
-
 export function initializeTelegram(): () => void {
   const app = webApp();
   if (!app) {
@@ -37,11 +25,21 @@ export function initializeTelegram(): () => void {
   }
 
   app.ready();
-  app.expand();
+  // Keep Telegram's native compact sheet instead of covering the chat. Calling
+  // expand() or requestFullscreen() here makes the sheet grow after loading,
+  // which is especially noticeable in Telegram Desktop. If this WebView was
+  // restored in fullscreen, leave it before rendering and allow native swipes.
+  if (app.isFullscreen) {
+    try {
+      app.exitFullscreen?.();
+    } catch {
+      // Clients without a working fullscreen API will retain their native mode.
+    }
+  }
+  app.enableVerticalSwipes?.();
   app.setHeaderColor?.('#07101c');
   app.setBackgroundColor?.('#07101c');
   app.setBottomBarColor?.('#07101c');
-  app.disableVerticalSwipes?.();
   setViewportVariables(app);
 
   const syncViewport = () => setViewportVariables(app);
@@ -50,15 +48,7 @@ export function initializeTelegram(): () => void {
   app.onEvent?.('contentSafeAreaChanged', syncViewport);
   app.onEvent?.('fullscreenChanged', syncViewport);
 
-  // Waiting one frame lets Telegram finish mounting its native container first.
-  const fullscreenTimer = window.setTimeout(() => requestTelegramFullscreen(app), 50);
-  // Some iOS/Android versions only honor fullscreen after a user gesture.
-  const retryOnFirstGesture = () => requestTelegramFullscreen(app);
-  document.addEventListener('pointerdown', retryOnFirstGesture, { once: true, passive: true });
-
   return () => {
-    window.clearTimeout(fullscreenTimer);
-    document.removeEventListener('pointerdown', retryOnFirstGesture);
     app.offEvent?.('viewportChanged', syncViewport);
     app.offEvent?.('safeAreaChanged', syncViewport);
     app.offEvent?.('contentSafeAreaChanged', syncViewport);

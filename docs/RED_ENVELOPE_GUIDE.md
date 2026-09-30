@@ -226,11 +226,11 @@ Check the alert shown by Telegram. Common causes are already claimed, envelope c
 - Confirm Redis is running.
 - Send new messages after the bot is present; historical Telegram messages are not imported.
 
-## 11. Mini App fullscreen behavior
+## 11. Mini App compact behavior
 
-The frontend calls Telegram's `expand()` API for older clients and `requestFullscreen()` for Telegram Mini Apps 8.0+ clients. It also listens for Telegram viewport and safe-area changes so content does not sit under an iPhone notch, Android status area, or bottom gesture bar.
+The frontend intentionally leaves the Mini App in Telegram's native compact sheet so the surrounding Telegram page remains visible. It does not call `expand()` or `requestFullscreen()` after loading. If Telegram restores the WebView in fullscreen, the frontend requests `exitFullscreen()` and re-enables vertical swipes. It still listens for Telegram viewport and safe-area changes so the layout follows the actual sheet height and avoids notches and gesture bars.
 
-If an older Telegram client does not implement true fullscreen, Telegram may keep its native header visible. A web app cannot forcibly remove native Telegram chrome in that case; update Telegram and reopen the Mini App. Also make sure the app is opened with the bot's **Open Red Envelope Wallet** Web App button, not by pasting the frontend URL into Telegram's ordinary in-app browser.
+Telegram controls the exact compact-sheet height for each client and screen size; a web app cannot force an exact percentage such as 70%. The app therefore keeps Telegram's initial native size rather than setting a hard-coded browser height. Make sure it is opened with the bot's **Open Red Envelope Wallet** Web App button rather than by pasting the frontend URL into Telegram's ordinary in-app browser.
 
 ## 12. Does the transaction design fit the requirement?
 
