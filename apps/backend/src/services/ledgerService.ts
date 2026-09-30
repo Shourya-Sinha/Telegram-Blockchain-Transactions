@@ -14,6 +14,10 @@ export async function ensureWalletForTelegram(identity: { telegramId: bigint; us
     include: { wallet: true }
   });
   if (user.status === 'BANNED') throw new AppError(403, 'This Telegram account is banned', 'BANNED');
+  // Imported lazily to avoid a module cycle: the development credit service
+  // uses the ledger helpers below for its one-time test-only credit.
+  const { grantAutomaticTestCredit } = await import('./devCreditService');
+  await grantAutomaticTestCredit(user.id);
   return user;
 }
 

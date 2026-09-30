@@ -11,12 +11,14 @@ import { rateLimit } from '../middleware/rateLimit';
 import { config } from '../config';
 import { prisma } from '../lib/prisma';
 import { jsonSafe } from '@red-envelope/shared';
+import { grantAutomaticTestCredit } from '../services/devCreditService';
 
 export const userRouter = Router();
 userRouter.use(telegramAuth);
 
 userRouter.get('/me', async (req, res) => {
   const user = req.telegramUser!;
+  await grantAutomaticTestCredit(user.id);
   const [wallet, account] = await Promise.all([
     getWalletSummary(user.id),
     prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } })

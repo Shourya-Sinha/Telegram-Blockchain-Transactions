@@ -113,7 +113,7 @@ function UsersPage() {
 }
 
 function UserTransactionPanel({ user, loading, error, testCreditEnabled, onCredited }: { user?: User; loading: boolean; error: Error | null; testCreditEnabled: boolean; onCredited: () => void }) {
-  const [amount, setAmount] = useState('100');
+  const [amount, setAmount] = useState('1000');
   const [reason, setReason] = useState('Local red-envelope testing');
   const [message, setMessage] = useState('');
   const credit = useMutation({

@@ -47,6 +47,7 @@ export const config = {
   claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20),
   // Test credits mint internal ledger balance and must never enter real-funds mode.
   allowDevCredit: required('ALLOW_DEV_CREDIT', 'false') === 'true' && nodeEnv !== 'production' && fundsMode === 'test',
+  devAutoCreditMinor: BigInt(Math.round(Math.max(0, Math.min(10_000, number('DEV_AUTO_CREDIT_USDT', 0))) * 1_000_000)),
   chainOperationsEnabled: fundsMode === 'real',
   redEnvelope: {
     // Admin-created envelopes are always paid from this real internal wallet.
@@ -61,6 +62,9 @@ export function assertProductionConfig(): void {
   }
   if (config.nodeEnv === 'production' && process.env.ALLOW_DEV_CREDIT === 'true') {
     throw new Error('ALLOW_DEV_CREDIT must be false in production');
+  }
+  if (config.nodeEnv === 'production' && config.devAutoCreditMinor > 0n) {
+    throw new Error('DEV_AUTO_CREDIT_USDT must be 0 in production');
   }
   if (config.fundsMode === 'real') {
     const missing = ['BOT_TOKEN', 'DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'TRON_HOT_WALLET_ADDRESS', 'HOT_WALLET_PRIVATE_KEY']

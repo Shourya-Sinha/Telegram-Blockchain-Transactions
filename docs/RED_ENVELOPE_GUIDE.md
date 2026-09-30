@@ -106,11 +106,14 @@ NODE_ENV=development
 FUNDS_MODE=test
 DEPOSIT_MODE=disabled
 ALLOW_DEV_CREDIT=true
+DEV_AUTO_CREDIT_USDT=1000
 ```
 
-Then, after the treasury user has sent `/start`, use either method:
+With `DEV_AUTO_CREDIT_USDT=1000`, each user receives 1,000 test USDT exactly once on their first `/start` or Mini App `/me` request. The immutable `DEV_CREDIT` ledger marker and wallet row lock prevent refreshes or concurrent requests from granting it twice. Set the value to `0` when automatic funding is not wanted.
 
-- In **Admin → Users**, find the Telegram user, open **Transactions**, enter an amount and reason under **Add test USDT**, then confirm.
+For additional test funds, use either method:
+
+- In **Admin → Users**, find the Telegram user, open **Transactions**, enter an amount and reason under **Add test USDT**, then confirm. The form defaults to 1,000 USDT, permits up to 10,000 per audited action, and can be used again when more test funds are needed.
 - Or use the command line:
 
   ```bash
@@ -132,6 +135,7 @@ NODE_ENV=production
 FUNDS_MODE=real
 DEPOSIT_MODE=unique
 ALLOW_DEV_CREDIT=false
+DEV_AUTO_CREDIT_USDT=0
 ```
 
 It also requires all production secrets and TRON wallet settings. Startup fails closed if real mode is incomplete, if test credit is enabled in production, or if deposits are not configured for unique addresses. `DEPOSIT_MODE=unique` uses each user's `User.depositAddress`; addresses must first be provisioned by reviewed self-custody/key-management infrastructure or a custody provider. The shared hot-wallet address is never returned as a production user deposit address.
