@@ -12,6 +12,9 @@ import { tronGateway } from '../services/tronGateway';
 import { writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
 import { jsonSafe } from '@red-envelope/shared';
+import { createAndPublishEnvelope } from '../services/envelopePublishingService';
+import { listRegisteredGroups } from '../services/groupService';
+import { AppError } from '../utils/errors';
 
 export const adminRouter = Router();
 
@@ -25,6 +28,75 @@ adminRouter.post('/auth/login', rateLimit('admin-login', 10), async (req, res) =
 });
 
 adminRouter.use(adminAuth);
+
+adminRouter.get('/envelopes/setup', async (_req, res) => {
+  const groups = await listRegisteredGroups();
+  const rawTreasuryId = config.redEnvelope.treasuryTelegramId;
+  let treasury = null;
+  if (/^\d+$/.test(rawTreasuryId)) {
+    treasury = await prisma.user.findUnique({
+      where: { telegramId: BigInt(rawTreasuryId) },
+      select: {
+        id: true,
+        telegramId: true,
+        firstName: true,
+        username: true,
+        status: true,
+        wallet: { select: { availableMinor: true, lockedMinor: true } }
+      }
+    });
+  }
+  const recent = await prisma.redEnvelope.findMany({
+    include: {
+      sender: { select: { telegramId: true, firstName: true, username: true } },
+      _count: { select: { claims: true } }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 25
+  });
+  res.json(jsonSafe({
+    configured: Boolean(rawTreasuryId && treasury?.wallet && treasury.status === 'ACTIVE'),
+    configurationMessage: !rawTreasuryId
+      ? 'Set RED_ENVELOPE_TREASURY_TELEGRAM_ID, then restart the backend.'
+      : !treasury?.wallet
+        ? 'The treasury Telegram wallet is not initialized. Run /start from that account.'
+        : treasury.status !== 'ACTIVE'
+          ? 'The configured treasury user is banned. Restore access or configure a different treasury.'
+          : undefined,
+    treasury,
+    groups,
+    recent
+  }));
+});
+
+adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => {
+  const payload = z.object({
+    total: z.string().regex(/^\d+(\.\d{1,6})?$/),
+    count: z.number().int().min(1).max(500),
+    mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
+    groupId: z.string().regex(/^-?\d+$/),
+    expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440)
+  }).parse(req.body);
+  if (!/^\d+$/.test(config.redEnvelope.treasuryTelegramId)) {
+    throw new AppError(503, 'RED_ENVELOPE_TREASURY_TELEGRAM_ID is not configured', 'TREASURY_NOT_CONFIGURED');
+  }
+  const treasury = await prisma.user.findUnique({
+    where: { telegramId: BigInt(config.redEnvelope.treasuryTelegramId) },
+    select: { id: true, status: true, wallet: { select: { id: true } } }
+  });
+  if (!treasury?.wallet) {
+    throw new AppError(404, 'Treasury wallet not found. Open the bot and run /start from the configured treasury Telegram account.', 'TREASURY_NOT_FOUND');
+  }
+  if (treasury.status !== 'ACTIVE') {
+    throw new AppError(403, 'The configured treasury user is banned', 'TREASURY_BANNED');
+  }
+  const envelope = await createAndPublishEnvelope(treasury.id, {
+    ...payload,
+    actorId: req.adminUser!.id,
+    ipAddress: req.ip
+  });
+  res.status(201).json(jsonSafe(envelope));
+});
 
 adminRouter.get('/dashboard', async (req, res) => {
   const [walletLiability, pendingWithdrawals, depositsToday, ledgerRows] = await Promise.all([

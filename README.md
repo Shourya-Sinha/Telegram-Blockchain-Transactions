@@ -15,6 +15,8 @@ packages/
   shared/        BigInt minor-unit money utilities and request schemas
 ```
 
+**New to the envelope flow?** Read the complete [group setup, admin sending, and user claiming guide](docs/RED_ENVELOPE_GUIDE.md). It explains which wallet pays, how a group is discovered, what members tap, and how to test safely without real funds.
+
 The backend has:
 
 - PostgreSQL-only persistence through Prisma and an explicit `WalletAccount` + `LedgerEntry` ledger.
@@ -74,8 +76,10 @@ The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend
 3. Expose the backend over HTTPS and set `TELEGRAM_WEBHOOK_URL=https://your-domain/telegram/webhook`.
 4. The backend registers the webhook on startup and checks `X-Telegram-Bot-Api-Secret-Token` on every webhook request.
 5. Configure the bot menu or `/start` to open the Mini App URL (`PUBLIC_APP_URL`).
+6. Add the bot to each destination group, promote it so it can send/edit messages and verify membership, then run `/registergroup` in that group.
+7. Run `/myid` from the funded treasury Telegram account and set that number as `RED_ENVELOPE_TREASURY_TELEGRAM_ID` to enable admin-created envelopes.
 
-The bot supports `/start`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Its claim callback data is only the UUID envelope ID.
+The bot supports `/start`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Its claim callback data is only the UUID envelope ID. See the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow.
 
 ## Tron / deposits / withdrawals
 
@@ -128,6 +132,7 @@ Admin routes use `Authorization: Bearer <JWT>`:
 - `POST /api/admin/auth/login`
 - `GET /api/admin/dashboard`, `/users`, `/withdrawals`, `/audit-logs`
 - `POST /api/admin/withdrawals/:id/approve`, `/retry`
+- `GET /api/admin/envelopes/setup`, `POST /api/admin/envelopes/send`
 - `POST /api/admin/emergency/disable-withdrawals`, `/disable-envelopes`
 - `GET /api/admin/settings`, `PUT /api/admin/settings/:chatId`
 

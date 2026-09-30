@@ -4,6 +4,6 @@
     "module": "CommonJS", "moduleResolution": "Node", "outDir": "dist", "rootDir": ".",
     "declaration": true, "noEmitOnError": true, "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "prisma/seed.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "prisma/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -37,7 +37,12 @@ export const config = {
     autoApprovalLimitMinor: BigInt(Math.round(number('WITHDRAWAL_AUTO_APPROVAL_LIMIT', 50) * 1_000_000))
   },
   rateLimitPerMinute: number('RATE_LIMIT_PER_MINUTE', 60),
-  claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20)
+  claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20),
+  redEnvelope: {
+    // Admin-created envelopes are always paid from this real internal wallet.
+    // Keeping the treasury explicit prevents the admin panel from minting unbacked balances.
+    treasuryTelegramId: required('RED_ENVELOPE_TREASURY_TELEGRAM_ID')
+  }
 } as const;
 
 export function assertProductionConfig(): void {
