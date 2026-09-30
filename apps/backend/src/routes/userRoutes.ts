@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createEnvelope, claimEnvelope, getEnvelope } from '../services/envelopeService';
+import { claimEnvelope, getEnvelope } from '../services/envelopeService';
+import { createAndPublishEnvelope } from '../services/envelopePublishingService';
+import { listRegisteredGroups } from '../services/groupService';
+import { assertTelegramGroupMembership, isTelegramGroupMember } from '../services/telegramService';
 import { getLedger, getWalletSummary } from '../services/ledgerService';
 import { createWithdrawal } from '../services/withdrawalService';
 import { telegramAuth } from '../middleware/auth';
@@ -32,15 +35,37 @@ userRouter.get('/deposit/address', async (_req, res) => {
   res.json({ address: config.tron.hotWalletAddress, chain: 'TRC20', confirmations: config.tron.confirmations });
 });
 
+userRouter.get('/groups', async (req, res) => {
+  const groups = await listRegisteredGroups();
+  const memberGroups = [];
+  for (const group of groups) {
+    if (group.enabled && await isTelegramGroupMember(group.chatId, req.telegramUser!.telegramId)) memberGroups.push(group);
+  }
+  res.json(jsonSafe(memberGroups));
+});
+
 userRouter.post('/envelopes', rateLimit('envelope-create'), async (req, res) => {
-  const payload = z.object({ total: z.string(), count: z.number().int(), mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'), groupId: z.string(), expiresInMinutes: z.number().int().default(1440) }).parse(req.body);
-  const envelope = await createEnvelope(req.telegramUser!.id, { ...payload, ipAddress: req.ip });
+  const payload = z.object({
+    total: z.string().regex(/^\d+(\.\d{1,6})?$/),
+    count: z.number().int().min(1).max(500),
+    mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
+    groupId: z.string().regex(/^-?\d+$/),
+    expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440)
+  }).parse(req.body);
+  await assertTelegramGroupMembership(BigInt(payload.groupId), req.telegramUser!.telegramId);
+  const envelope = await createAndPublishEnvelope(req.telegramUser!.id, { ...payload, ipAddress: req.ip });
   res.status(201).json(jsonSafe(envelope));
 });
 
-userRouter.get('/envelopes/:id', async (req, res) => res.json(jsonSafe(await getEnvelope(String(req.params.id)))));
+userRouter.get('/envelopes/:id', async (req, res) => {
+  const envelope = await getEnvelope(String(req.params.id));
+  await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
+  res.json(jsonSafe(envelope));
+});
 userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), async (req, res) => {
-  const result = await claimEnvelope(req.telegramUser!.id, String(req.params.id), req.ip);
+  const envelope = await getEnvelope(String(req.params.id));
+  await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
+  const result = await claimEnvelope(req.telegramUser!.id, envelope.id, req.ip);
   res.json(jsonSafe(result));
 });
 
