@@ -148,9 +148,11 @@ model Withdrawal {
   chain          Chain            @default(TRC20)
   txHash         String?
   status         WithdrawalStatus @default(QUEUED)
-  idempotencyKey  String           @unique
+  idempotencyKey String           @unique
   attempts       Int              @default(0)
+  fundsReserved  Boolean          @default(false)
   createdAt      DateTime         @default(now())
+  completedAt    DateTime?
   user           User             @relation(fields: [userId], references: [id], onDelete: Restrict)
   @@index([status, createdAt])
   @@index([userId, createdAt])
@@ -162,9 +164,13 @@ model Deposit {
   userId        String        @db.Uuid
   amountMinor   BigInt
   fromAddress   String
+  toAddress     String
+  tokenContract String
   status        DepositStatus @default(PENDING)
   confirmations Int           @default(0)
   createdAt     DateTime      @default(now())
+  detectedAt    DateTime      @default(now())
+  confirmedAt   DateTime?
   user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
   @@index([status, createdAt])
 }

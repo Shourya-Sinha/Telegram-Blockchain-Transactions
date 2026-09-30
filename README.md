@@ -79,7 +79,7 @@ The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend
 6. Add the bot to each destination group, promote it so it can send/edit messages and verify membership, then run `/registergroup` in that group.
 7. Run `/myid` from the funded treasury Telegram account and set that number as `RED_ENVELOPE_TREASURY_TELEGRAM_ID` to enable admin-created envelopes.
 
-The bot supports `/start`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Its claim callback data is only the UUID envelope ID. See the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow.
+The bot supports `/start`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Its claim callback data is only the UUID envelope ID. See the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow and the [requirements status](docs/REQUIREMENTS_STATUS.md) for an honest implemented/partial/production-gate matrix.
 
 ## Tron / deposits / withdrawals
 
@@ -92,7 +92,7 @@ Set the TRC20 network values in `.env`:
 
 `HOT_WALLET_PRIVATE_KEY` is intentionally read only from the environment. In production replace the signing path with AWS KMS or HashiCorp Vault; do not put a private key in source control, Docker images, logs, or ordinary database fields.
 
-The `User.depositAddress` field is the safe mapping point for a production deposit-address allocator. The deposit worker polls TRC20 transfers, resolves the recipient to a provisioned user deposit address, records the unique transaction as `PENDING`, and credits the ledger only when 19 confirmations are present. The demo `/api/deposit/address` returns the configured hot-wallet address so the UI is usable during development; before accepting funds, provision unique addresses and return that address from the route (or implement an approved memo/address allocation service). Do not credit a shared address without a verified user-to-address mapping.
+The `User.depositAddress` field is the safe mapping point for a production deposit-address allocator. In `FUNDS_MODE=real` with `DEPOSIT_MODE=unique`, the deposit worker scans each provisioned address, records transaction hash, token contract, source, destination, amount and actual confirmation count, and credits the ledger only after the configured depth. `/api/deposit/address` returns only that user's assigned address; it fails closed when an address is unavailable and never substitutes the shared hot-wallet address. Address/key provisioning and sweeping must be integrated with reviewed custody or KMS/HSM infrastructure before accepting funds.
 
 Withdrawals reserve the requested amount and fee in the ledger before queueing. Amounts below `WITHDRAWAL_AUTO_APPROVAL_LIMIT` are queued automatically; larger requests remain queued until a finance/super admin approves them. A failed request is never silently re-credited: the original debit remains the auditable liability settlement and finance can retry only after checking the chain.
 
@@ -123,15 +123,15 @@ Withdrawals reserve the requested amount and fee in the ledger before queueing. 
 
 TMA routes use `X-Telegram-Init-Data`:
 
-- `GET /api/me`, `/api/wallet`, `/api/ledger`, `/api/deposit/address`
+- `GET /api/me`, `/api/wallet`, `/api/ledger`, `/api/deposit/address`, `/api/deposits`
 - `POST /api/envelopes`, `GET /api/envelopes/:id`, `POST /api/envelopes/:id/claim`
-- `POST /api/withdrawals`, `GET /api/withdrawals`
+- `POST /api/withdrawals`, `GET /api/withdrawals`, `GET /api/withdrawals/:id`
 
 Admin routes use `Authorization: Bearer <JWT>`:
 
 - `POST /api/admin/auth/login`
-- `GET /api/admin/dashboard`, `/users`, `/withdrawals`, `/audit-logs`
-- `POST /api/admin/withdrawals/:id/approve`, `/retry`
+- `GET /api/admin/dashboard`, `/users`, `/deposits`, `/withdrawals`, `/audit-logs`
+- `POST /api/admin/withdrawals/:id/approve`, `/retry`, `/reject`
 - `GET /api/admin/envelopes/setup`, `POST /api/admin/envelopes/send`
 - `POST /api/admin/emergency/disable-withdrawals`, `/disable-envelopes`
 - `GET /api/admin/settings`, `PUT /api/admin/settings/:chatId`

@@ -30,6 +30,10 @@ These roles are easy to confuse:
 
 A regular funded user can also send from the Mini App's **DeFi** tab or run `/redpacket` in a group. That envelope is paid from that user's own balance.
 
+### Telegram ID versus name
+
+The numeric Telegram user ID is the immutable external account key and is unique in the database. Signed Telegram updates and validated Mini App init data supply that ID. The display name and optional `@username` are stored only to make bot messages and admin screens understandable; users can change them, so neither is used to own a wallet, authorize a claim, or locate financial records. Internally, wallet and ledger rows reference the application's UUID user ID.
+
 ## 3. Configure the bot and webhook
 
 Set at least these values in `.env`:
@@ -99,16 +103,42 @@ This repository includes an explicitly guarded development helper so the full in
 
 ```dotenv
 NODE_ENV=development
+FUNDS_MODE=test
+DEPOSIT_MODE=disabled
 ALLOW_DEV_CREDIT=true
+DEV_AUTO_CREDIT_USDT=1000
 ```
 
-Then, after the treasury user has sent `/start`:
+With `DEV_AUTO_CREDIT_USDT=1000`, each user receives 1,000 test USDT exactly once on their first `/start` or Mini App `/me` request. The immutable `DEV_CREDIT` ledger marker and wallet row lock prevent refreshes or concurrent requests from granting it twice. Set the value to `0` when automatic funding is not wanted.
 
-```bash
-npm run db:dev-credit -- 123456789 100
+For additional test funds, use either method:
+
+- In **Admin → Users**, find the Telegram user, open **Transactions**, enter an amount and reason under **Add test USDT**, then confirm. The form defaults to 1,000 USDT, permits up to 10,000 per audited action, and can be used again when more test funds are needed.
+- Or use the command line:
+
+  ```bash
+  npm run db:dev-credit -- 123456789 100
+  ```
+
+The admin control is restricted to `SUPER_ADMIN` and `FINANCE` roles, accepts at most 10,000 USDT per action, and is hard-disabled whenever `NODE_ENV=production`. Every credit atomically increases the available internal balance, creates a `TRANSFER / CREDIT` ledger entry with reference type `DEV_CREDIT`, and writes `DEV_WALLET_CREDITED` to the admin audit log with the operator, reason, IP address, previous balance, and new balance.
+
+This is **not a blockchain transaction** and adds no real USDT to the hot wallet. In `FUNDS_MODE=test`, blockchain deposit scanners, withdrawal workers, user deposits, and user withdrawals are disabled, so test liabilities cannot drain a real wallet.
+
+### Switching to real funds
+
+Funds mode is deliberately controlled by the deployment environment—not by an admin-panel switch. Allowing a logged-in operator to turn test balances into withdrawable real liabilities would create a critical wallet-drain risk. The admin panel clearly displays **TEST MODE** or **REAL FUNDS**, but changing modes requires an reviewed configuration change and backend restart.
+
+A real deployment requires:
+
+```dotenv
+NODE_ENV=production
+FUNDS_MODE=real
+DEPOSIT_MODE=unique
+ALLOW_DEV_CREDIT=false
+DEV_AUTO_CREDIT_USDT=0
 ```
 
-This creates an audited `DEV_CREDIT` ledger entry for 100 test USDT. Never enable or run this helper in staging or production; it creates an unbacked test balance.
+It also requires all production secrets and TRON wallet settings. Startup fails closed if real mode is incomplete, if test credit is enabled in production, or if deposits are not configured for unique addresses. `DEPOSIT_MODE=unique` uses each user's `User.depositAddress`; addresses must first be provisioned by reviewed self-custody/key-management infrastructure or a custody provider. The shared hot-wallet address is never returned as a production user deposit address.
 
 ### Production deposit warning
 
@@ -226,11 +256,11 @@ Check the alert shown by Telegram. Common causes are already claimed, envelope c
 - Confirm Redis is running.
 - Send new messages after the bot is present; historical Telegram messages are not imported.
 
-## 11. Mini App fullscreen behavior
+## 11. Mini App compact behavior
 
-The frontend calls Telegram's `expand()` API for older clients and `requestFullscreen()` for Telegram Mini Apps 8.0+ clients. It also listens for Telegram viewport and safe-area changes so content does not sit under an iPhone notch, Android status area, or bottom gesture bar.
+The frontend intentionally leaves the Mini App in Telegram's native compact sheet so the surrounding Telegram page remains visible. It does not call `expand()` or `requestFullscreen()` after loading. If Telegram restores the WebView in fullscreen, the frontend requests `exitFullscreen()` and re-enables vertical swipes. It still listens for Telegram viewport and safe-area changes so the layout follows the actual sheet height and avoids notches and gesture bars.
 
-If an older Telegram client does not implement true fullscreen, Telegram may keep its native header visible. A web app cannot forcibly remove native Telegram chrome in that case; update Telegram and reopen the Mini App. Also make sure the app is opened with the bot's **Open Red Envelope Wallet** Web App button, not by pasting the frontend URL into Telegram's ordinary in-app browser.
+Telegram controls the exact compact-sheet height for each client and screen size; a web app cannot force an exact percentage such as 70%. The app therefore keeps Telegram's initial native size rather than setting a hard-coded browser height. Make sure it is opened with the bot's **Open Red Envelope Wallet** Web App button rather than by pasting the frontend URL into Telegram's ordinary in-app browser.
 
 ## 12. Does the transaction design fit the requirement?
 
