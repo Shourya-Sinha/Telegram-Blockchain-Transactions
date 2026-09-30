@@ -38,6 +38,8 @@ export const config = {
   },
   rateLimitPerMinute: number('RATE_LIMIT_PER_MINUTE', 60),
   claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20),
+  // Test credits mint internal ledger balance and must never be available in production.
+  allowDevCredit: required('ALLOW_DEV_CREDIT', 'false') === 'true' && required('NODE_ENV', 'development') !== 'production',
   redEnvelope: {
     // Admin-created envelopes are always paid from this real internal wallet.
     // Keeping the treasury explicit prevents the admin panel from minting unbacked balances.

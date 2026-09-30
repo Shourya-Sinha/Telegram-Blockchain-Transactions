@@ -9,9 +9,9 @@ import { adminAuth, requireAdminRole } from '../middleware/adminAuth';
 import { rateLimit } from '../middleware/rateLimit';
 import { approveWithdrawal, retryWithdrawal } from '../services/withdrawalService';
 import { tronGateway } from '../services/tronGateway';
-import { writeAudit } from '../services/ledgerService';
+import { creditWallet, writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
-import { jsonSafe } from '@red-envelope/shared';
+import { jsonSafe, parseUsdtToMinor } from '@red-envelope/shared';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
 import { AppError } from '../utils/errors';
@@ -121,6 +121,40 @@ adminRouter.get('/users', async (req, res) => {
   const search = String(req.query.search ?? '').trim();
   const users = await prisma.user.findMany({ where: search ? (/^\d+$/.test(search) ? { telegramId: BigInt(search) } : { OR: [{ username: { contains: search, mode: 'insensitive' } }, { firstName: { contains: search, mode: 'insensitive' } }] }) : undefined, include: { wallet: true }, orderBy: { createdAt: 'desc' }, take: 100 });
   res.json(jsonSafe(users));
+});
+adminRouter.get('/testing', (_req, res) => {
+  res.json({ testCreditEnabled: config.allowDevCredit });
+});
+adminRouter.post('/users/:id/test-credit', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => {
+  if (!config.allowDevCredit) {
+    throw new AppError(403, 'Test credits are disabled. They can only be enabled outside production with ALLOW_DEV_CREDIT=true.', 'TEST_CREDIT_DISABLED');
+  }
+  const payload = z.object({
+    amount: z.string().regex(/^\d+(\.\d{1,6})?$/),
+    reason: z.string().trim().min(3).max(200)
+  }).parse(req.body);
+  const amountMinor = parseUsdtToMinor(payload.amount);
+  if (amountMinor <= 0n || amountMinor > 10_000n * 1_000_000n) {
+    throw new AppError(400, 'Test credit must be greater than 0 and no more than 10,000 USDT', 'INVALID_TEST_CREDIT');
+  }
+  const user = await prisma.user.findUnique({ where: { id: String(req.params.id) }, include: { wallet: true } });
+  if (!user?.wallet) throw new AppError(404, 'User wallet not found', 'WALLET_NOT_FOUND');
+
+  const referenceId = `admin-test-credit:${Date.now()}:${req.adminUser!.id}`;
+  const result = await prisma.$transaction(async (tx: any) => {
+    const credited = await creditWallet(tx, user.id, amountMinor, LedgerType.TRANSFER, 'DEV_CREDIT', referenceId);
+    await writeAudit(tx, {
+      actorId: req.adminUser!.id,
+      action: 'DEV_WALLET_CREDITED',
+      entityType: 'User',
+      entityId: user.id,
+      before: { availableMinor: (credited.availableMinor - amountMinor).toString() },
+      after: { amountMinor: amountMinor.toString(), availableMinor: credited.availableMinor.toString(), reason: payload.reason, referenceId },
+      ipAddress: req.ip
+    });
+    return credited;
+  });
+  res.status(201).json(jsonSafe({ ...result, amountMinor, referenceId }));
 });
 adminRouter.get('/users/:id', async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: String(req.params.id) }, include: { wallet: true, ledger: { orderBy: { createdAt: 'desc' }, take: 100 } } });

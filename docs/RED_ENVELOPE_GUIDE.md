@@ -102,13 +102,18 @@ NODE_ENV=development
 ALLOW_DEV_CREDIT=true
 ```
 
-Then, after the treasury user has sent `/start`:
+Then, after the treasury user has sent `/start`, use either method:
 
-```bash
-npm run db:dev-credit -- 123456789 100
-```
+- In **Admin → Users**, find the Telegram user, open **Transactions**, enter an amount and reason under **Add test USDT**, then confirm.
+- Or use the command line:
 
-This creates an audited `DEV_CREDIT` ledger entry for 100 test USDT. Never enable or run this helper in staging or production; it creates an unbacked test balance.
+  ```bash
+  npm run db:dev-credit -- 123456789 100
+  ```
+
+The admin control is restricted to `SUPER_ADMIN` and `FINANCE` roles, accepts at most 10,000 USDT per action, and is hard-disabled whenever `NODE_ENV=production`. Every credit atomically increases the available internal balance, creates a `TRANSFER / CREDIT` ledger entry with reference type `DEV_CREDIT`, and writes `DEV_WALLET_CREDITED` to the admin audit log with the operator, reason, IP address, previous balance, and new balance.
+
+This is **not a blockchain transaction** and adds no real USDT to the hot wallet. It creates an unbacked test liability solely for local testing. Never enable it in staging or production.
 
 ### Production deposit warning
 
