@@ -25,5 +25,15 @@ export default function App() {
   useEffect(() => { if (meQuery.data) setMe(meQuery.data); }, [meQuery.data, setMe]);
   useEffect(() => configureBackButton(() => setClaimId(undefined), Boolean(claimId)), [claimId]);
   const me = meQuery.data ?? demoMe;
-  return <div className="app-shell"><div className="ambient ambient-one" /><div className="ambient ambient-two" />{activeTab === 'wallet' && <WalletScreen me={me} onClaim={setClaimId} />}{activeTab === 'defi' && <DeFiScreen />}{activeTab === 'yield' && <YieldScreen />}{activeTab === 'apps' && <AppsScreen />}<BottomNav />{claimId && <ClaimModal envelopeId={claimId} onClose={() => setClaimId(undefined)} />}<div className="build-indicator">{meQuery.isError ? 'Preview mode · open inside Telegram for live data' : 'Custodial ledger online'}</div></div>;
+  return <div className="tg-sheet-viewport">
+    <div className="tg-sheet-scrim" aria-hidden="true" />
+    <div className="app-shell">
+      <div className="sheet-grabber" aria-hidden="true" />
+      <div className="ambient ambient-one" /><div className="ambient ambient-two" />
+      {activeTab === 'wallet' && <WalletScreen me={me} onClaim={setClaimId} />}{activeTab === 'defi' && <DeFiScreen />}{activeTab === 'yield' && <YieldScreen />}{activeTab === 'apps' && <AppsScreen />}
+      <BottomNav />
+      {claimId && <ClaimModal envelopeId={claimId} onClose={() => setClaimId(undefined)} />}
+      <div className="build-indicator">{meQuery.isError ? 'Preview mode · open inside Telegram for live data' : 'Custodial ledger online'}</div>
+    </div>
+  </div>;
 }

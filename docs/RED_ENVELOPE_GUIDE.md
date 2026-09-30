@@ -2,6 +2,8 @@
 
 This guide describes what a red envelope means in this repository and the exact Telegram flow.
 
+> For the accounting side — whose wallet is debited, when, and why a claim never produces a blockchain transaction — see [`MONEY_FLOW.md`](MONEY_FLOW.md).
+
 ## 1. What a red envelope is
 
 A red envelope is a prepaid distribution of the app's **internal USDT balance**:
@@ -256,11 +258,21 @@ Check the alert shown by Telegram. Common causes are already claimed, envelope c
 - Confirm Redis is running.
 - Send new messages after the bot is present; historical Telegram messages are not imported.
 
-## 11. Mini App compact behavior
+## 11. Mini App sheet behavior (no full-screen takeover)
 
-The frontend intentionally leaves the Mini App in Telegram's native compact sheet so the surrounding Telegram page remains visible. It does not call `expand()` or `requestFullscreen()` after loading. If Telegram restores the WebView in fullscreen, the frontend requests `exitFullscreen()` and re-enables vertical swipes. It still listens for Telegram viewport and safe-area changes so the layout follows the actual sheet height and avoids notches and gesture bars.
+The Mini App never paints edge to edge. It renders as a **bottom sheet that rises from the bottom and covers 80% of the viewport Telegram reports**, with curved top-left/top-right corners and a small grab handle. The remaining 20% at the top is left uncovered and is painted with Telegram's own `secondary_bg_color`, so the app reads as a panel inside Telegram instead of an external full-screen page.
 
-Telegram controls the exact compact-sheet height for each client and screen size; a web app cannot force an exact percentage such as 70%. The app therefore keeps Telegram's initial native size rather than setting a hard-coded browser height. Make sure it is opened with the bot's **Open Red Envelope Wallet** Web App button rather than by pasting the frontend URL into Telegram's ordinary in-app browser.
+Key points:
+
+- The sheet is measured against `Telegram.WebApp.viewportStableHeight`, never the physical screen. A phone, a small Telegram Desktop window and a maximised Telegram Desktop window all get the same proportional sheet.
+- `expand()` and `requestFullscreen()` are never called. If Telegram restores the WebView in fullscreen, the frontend calls `exitFullscreen()` — and it does so again on every `fullscreenChanged` event, so the client cannot silently re-enter fullscreen.
+- On Telegram for Android/iOS an un-expanded Mini App is *already* a native partial sheet with the chat visible above it. On those clients the document fills the WebView (`body[data-sheet="native"]`) so the gap is not applied twice; Telegram keeps owning the sheet geometry.
+- Everything that used to be `position: fixed` — the bottom navigation, the claim/deposit/withdraw modals, the ambient glows, the build indicator — is now scoped inside the sheet, so no overlay can paint over the strip that is deliberately left free.
+- Content scrolls inside the sheet (`.screen`), with `overscroll-behavior: contain` so a scroll never chains out to the Telegram client.
+
+Sizing knobs live in one place: `SHEET_HEIGHT_RATIO` in `apps/frontend/src/telegram.ts` (default `0.8`) and the `--app-sheet-height` / `--app-sheet-radius` CSS variables it writes.
+
+Telegram still controls the *outer* window on desktop; a web app cannot resize the Telegram Desktop Mini App window itself. The 80/20 split and the rounded top corners are therefore drawn by the app inside whatever viewport Telegram hands it. Make sure it is opened with the bot's **Open Red Envelope Wallet** Web App button rather than by pasting the frontend URL into Telegram's ordinary in-app browser.
 
 ## 12. Does the transaction design fit the requirement?
 
