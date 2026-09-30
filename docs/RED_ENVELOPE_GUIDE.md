@@ -2,6 +2,8 @@
 
 This guide describes what a red envelope means in this repository and the exact Telegram flow.
 
+> For the accounting side — whose wallet is debited, when, and why a claim never produces a blockchain transaction — see [`MONEY_FLOW.md`](MONEY_FLOW.md).
+
 ## 1. What a red envelope is
 
 A red envelope is a prepaid distribution of the app's **internal USDT balance**:

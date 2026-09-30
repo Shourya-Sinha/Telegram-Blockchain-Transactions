@@ -17,6 +17,8 @@ packages/
 
 **New to the envelope flow?** Read the complete [group setup, admin sending, and user claiming guide](docs/RED_ENVELOPE_GUIDE.md). It explains which wallet pays, how a group is discovered, what members tap, and how to test safely without real funds.
 
+**Confused about where the money actually moves?** [`docs/MONEY_FLOW.md`](docs/MONEY_FLOW.md) traces one envelope end to end: who is debited and when, why an admin send charges the treasury and not the admin, how the WeChat-style random split stays exact, and why a claim costs zero Tron transactions.
+
 The backend has:
 
 - PostgreSQL-only persistence through Prisma and an explicit `WalletAccount` + `LedgerEntry` ledger.
