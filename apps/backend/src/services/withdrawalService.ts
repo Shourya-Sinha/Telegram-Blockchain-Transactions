@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { config } from '../config';
 import { AppError, isPrismaUniqueError } from '../utils/errors';
-import { debitWallet, type Transaction, writeAudit } from './ledgerService';
+import { releaseReservedWallet, reserveWallet, settleReservedWallet, type Transaction, writeAudit } from './ledgerService';
 import { withdrawalQueue } from '../jobs/queues';
 import { tronGateway } from './tronGateway';
 
@@ -30,11 +30,11 @@ export async function createWithdrawal(userId: string, input: RequestInput) {
 
   try {
     const withdrawal = await prisma.$transaction(async (tx: Transaction) => {
-      const created = await tx.withdrawal.create({ data: { userId, amountMinor, feeMinor, toAddress: parsed.toAddress, idempotencyKey, status: WithdrawalStatus.QUEUED } });
-      const debit = await debitWallet(tx, userId, amountMinor, LedgerType.WITHDRAWAL, 'WITHDRAWAL', created.id);
-      await debitWallet(tx, userId, feeMinor, LedgerType.FEE, 'WITHDRAWAL', created.id);
-      await writeAudit(tx, { action: 'WITHDRAWAL_REQUESTED', entityType: 'Withdrawal', entityId: created.id, ipAddress: input.ipAddress, after: { amountMinor: amountMinor.toString(), feeMinor: feeMinor.toString(), toAddress: parsed.toAddress, idempotencyKey } });
-      return { ...created, availableMinor: debit.availableMinor - feeMinor };
+      const created = await tx.withdrawal.create({ data: { userId, amountMinor, feeMinor, toAddress: parsed.toAddress, idempotencyKey, status: WithdrawalStatus.QUEUED, fundsReserved: true } });
+      await reserveWallet(tx, userId, amountMinor, LedgerType.WITHDRAWAL, 'WITHDRAWAL', created.id);
+      const feeReserve = await reserveWallet(tx, userId, feeMinor, LedgerType.FEE, 'WITHDRAWAL', created.id);
+      await writeAudit(tx, { action: 'WITHDRAWAL_REQUESTED', entityType: 'Withdrawal', entityId: created.id, ipAddress: input.ipAddress, after: { amountMinor: amountMinor.toString(), feeMinor: feeMinor.toString(), reservedMinor: (amountMinor + feeMinor).toString(), toAddress: parsed.toAddress, idempotencyKey } });
+      return { ...created, availableMinor: feeReserve.availableMinor, lockedMinor: feeReserve.lockedMinor };
     }, { isolationLevel: 'ReadCommitted' });
     if (amountMinor <= config.withdrawal.autoApprovalLimitMinor) await withdrawalQueue.add('process', { withdrawalId: withdrawal.id }, { jobId: withdrawal.id, removeOnComplete: 100, removeOnFail: 100 });
     return withdrawal;
@@ -72,6 +72,36 @@ export async function retryWithdrawal(id: string, adminId: string, ipAddress?: s
   return updated;
 }
 
+export async function rejectWithdrawal(id: string, adminId: string, reason: string, ipAddress?: string) {
+  return prisma.$transaction(async (tx: Transaction) => {
+    const withdrawal = await lockWithdrawal(tx, id);
+    if (!withdrawal) throw new AppError(404, 'Withdrawal not found', 'WITHDRAWAL_NOT_FOUND');
+    if (![WithdrawalStatus.QUEUED, WithdrawalStatus.FAILED].includes(withdrawal.status) || withdrawal.txHash) {
+      throw new AppError(409, 'Only an unbroadcast queued or failed withdrawal can be rejected', 'INVALID_STATUS');
+    }
+    let availableMinor: bigint | undefined;
+    if (withdrawal.fundsReserved) {
+      const amountRelease = await releaseReservedWallet(tx, withdrawal.userId, withdrawal.amountMinor, LedgerType.REFUND, 'WITHDRAWAL_REJECTED', withdrawal.id);
+      availableMinor = amountRelease.availableMinor;
+      if (withdrawal.feeMinor > 0n) {
+        const feeRelease = await releaseReservedWallet(tx, withdrawal.userId, withdrawal.feeMinor, LedgerType.REFUND, 'WITHDRAWAL_FEE_REJECTED', withdrawal.id);
+        availableMinor = feeRelease.availableMinor;
+      }
+    }
+    const result = await tx.withdrawal.update({ where: { id }, data: { status: WithdrawalStatus.REJECTED, fundsReserved: false } });
+    await writeAudit(tx, {
+      actorId: adminId,
+      action: 'WITHDRAWAL_REJECTED',
+      entityType: 'Withdrawal',
+      entityId: id,
+      ipAddress,
+      before: { status: withdrawal.status },
+      after: { status: result.status, reason, releasedMinor: withdrawal.fundsReserved ? (withdrawal.amountMinor + withdrawal.feeMinor).toString() : 'legacy-debit-not-released' }
+    });
+    return { ...result, availableMinor };
+  });
+}
+
 export async function processWithdrawal(withdrawalId: string): Promise<void> {
   if (!config.chainOperationsEnabled) throw new AppError(403, 'Refusing to broadcast a blockchain withdrawal in test mode', 'TEST_MODE');
   const intent = await prisma.$transaction(async (tx: Transaction) => {
@@ -91,7 +121,7 @@ export async function processWithdrawal(withdrawalId: string): Promise<void> {
       throw new Error('Hot wallet cap exceeded; sweep to cold storage before broadcasting');
     }
     // If a previous RPC call succeeded but the response was lost, match the transfer before retrying.
-    let txHash = await tronGateway.findRecentOutgoingTransfer(intent.toAddress, intent.amountMinor, intent.intentStartedAt - 2 * 60_000);
+    let txHash = intent.txHash ?? await tronGateway.findRecentOutgoingTransfer(intent.toAddress, intent.amountMinor, intent.intentStartedAt - 2 * 60_000);
     if (!txHash) txHash = await tronGateway.sendUsdt(intent.toAddress, intent.amountMinor);
     await prisma.$transaction(async (tx: Transaction) => {
       const current = await lockWithdrawal(tx, withdrawalId);
@@ -102,8 +132,11 @@ export async function processWithdrawal(withdrawalId: string): Promise<void> {
     await prisma.withdrawal.update({ where: { id: withdrawalId }, data: { status: WithdrawalStatus.CONFIRMING } });
     await tronGateway.waitForConfirmations(txHash);
     await prisma.$transaction(async (tx: Transaction) => {
-      await tx.withdrawal.update({ where: { id: withdrawalId }, data: { status: WithdrawalStatus.COMPLETED } });
-      await writeAudit(tx, { action: 'WITHDRAWAL_COMPLETED', entityType: 'Withdrawal', entityId: withdrawalId, after: { txHash } });
+      const current = await lockWithdrawal(tx, withdrawalId);
+      if (!current) throw new AppError(404, 'Withdrawal not found', 'WITHDRAWAL_NOT_FOUND');
+      if (current.fundsReserved) await settleReservedWallet(tx, current.userId, current.amountMinor + current.feeMinor);
+      await tx.withdrawal.update({ where: { id: withdrawalId }, data: { status: WithdrawalStatus.COMPLETED, completedAt: new Date() } });
+      await writeAudit(tx, { action: 'WITHDRAWAL_COMPLETED', entityType: 'Withdrawal', entityId: withdrawalId, after: { txHash, settledReservedMinor: current.fundsReserved ? (current.amountMinor + current.feeMinor).toString() : 'legacy-debit' } });
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Withdrawal processing failed';

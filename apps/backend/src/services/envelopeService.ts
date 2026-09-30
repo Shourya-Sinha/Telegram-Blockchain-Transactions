@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
 import { createEnvelopeSchema, parseUsdtToMinor } from '@red-envelope/shared';
 import { prisma } from '../lib/prisma';
@@ -6,6 +6,7 @@ import { redis } from '../lib/redis';
 import { AppError, isPrismaUniqueError } from '../utils/errors';
 import { assertClaimEligibility } from './eligibilityService';
 import { creditWallet, debitWallet, type Transaction, writeAudit } from './ledgerService';
+import { randomClaimAmount } from '../utils/envelopeAllocation';
 
 export type CreateEnvelopeInput = {
   total: string;
@@ -17,28 +18,6 @@ export type CreateEnvelopeInput = {
   ipAddress?: string;
   actorId?: string;
 };
-
-function randomBigInt(maxExclusive: bigint): bigint {
-  if (maxExclusive <= 0n) throw new Error('random upper bound must be positive');
-  const bytes = Math.ceil(maxExclusive.toString(2).length / 8);
-  const excessBits = BigInt(bytes * 8) - BigInt(maxExclusive.toString(2).length);
-  const mask = (1n << BigInt(bytes * 8)) - 1n;
-  while (true) {
-    const candidate = BigInt(`0x${randomBytes(bytes).toString('hex')}`) & mask;
-    const normalized = excessBits > 0n ? candidate >> excessBits : candidate;
-    if (normalized < maxExclusive) return normalized;
-  }
-}
-
-/** Integer-only version of the classic "double mean" envelope algorithm. */
-function randomClaimAmount(remaining: bigint, slots: number): bigint {
-  if (slots <= 1) return remaining;
-  const maxByMean = (remaining / BigInt(slots)) * 2n;
-  const maxByRemainder = remaining - BigInt(slots - 1); // leave at least one minor unit per slot
-  const maximum = maxByMean < maxByRemainder ? maxByMean : maxByRemainder;
-  if (maximum <= 1n) return 1n;
-  return randomBigInt(maximum) + 1n;
-}
 
 export async function createEnvelope(senderId: string, input: CreateEnvelopeInput) {
   const parsed = createEnvelopeSchema.parse(input);

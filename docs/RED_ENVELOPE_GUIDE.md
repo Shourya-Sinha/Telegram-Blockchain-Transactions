@@ -30,6 +30,10 @@ These roles are easy to confuse:
 
 A regular funded user can also send from the Mini App's **DeFi** tab or run `/redpacket` in a group. That envelope is paid from that user's own balance.
 
+### Telegram ID versus name
+
+The numeric Telegram user ID is the immutable external account key and is unique in the database. Signed Telegram updates and validated Mini App init data supply that ID. The display name and optional `@username` are stored only to make bot messages and admin screens understandable; users can change them, so neither is used to own a wallet, authorize a claim, or locate financial records. Internally, wallet and ledger rows reference the application's UUID user ID.
+
 ## 3. Configure the bot and webhook
 
 Set at least these values in `.env`:

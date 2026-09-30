@@ -19,11 +19,14 @@ export function startWorkers(): void {
   if (config.chainOperationsEnabled) {
     new Worker('withdrawals', async (job) => processWithdrawal(job.data.withdrawalId), { connection: redis, concurrency: 2 });
     new Worker('deposits', async () => {
-      // Use a moving window; transaction-hash uniqueness makes overlap safe.
-      const transfers = await tronGateway.pollIncomingTransfers(Date.now() - 10 * 60_000);
-      for (const transfer of transfers) {
-        const user = await prisma.user.findFirst({ where: { depositAddress: transfer.toAddress }, select: { id: true } });
-        if (user) await recordIncomingTransfer(user.id, transfer);
+      // Each address belongs to one Telegram-ID-backed user. The overlapping
+      // scan window is safe because Deposit.txHash is globally unique.
+      const users = await prisma.user.findMany({ where: { depositAddress: { not: null } }, select: { id: true, depositAddress: true } });
+      const sinceMs = Date.now() - 10 * 60_000;
+      for (const user of users) {
+        if (!user.depositAddress) continue;
+        const transfers = await tronGateway.pollIncomingTransfers(user.depositAddress, sinceMs);
+        for (const transfer of transfers) await recordIncomingTransfer(user.id, transfer);
       }
     }, { connection: redis, concurrency: 1 });
     void depositQueue.add('poll', {}, { repeat: { every: 60_000 }, jobId: 'incoming-transfers-poll' });

@@ -93,6 +93,11 @@ userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claim
   res.json(jsonSafe(result));
 });
 
+userRouter.get('/deposits', async (req, res) => {
+  const deposits = await prisma.deposit.findMany({ where: { userId: req.telegramUser!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
+  res.json(jsonSafe(deposits));
+});
+
 userRouter.post('/withdrawals', rateLimit('withdrawal-create'), async (req, res) => {
   const payload = z.object({ amount: z.string(), toAddress: z.string(), idempotencyKey: z.string().uuid().optional() }).parse(req.body);
   const withdrawal = await createWithdrawal(req.telegramUser!.id, { ...payload, ipAddress: req.ip });
@@ -101,4 +106,9 @@ userRouter.post('/withdrawals', rateLimit('withdrawal-create'), async (req, res)
 userRouter.get('/withdrawals', async (req, res) => {
   const withdrawals = await prisma.withdrawal.findMany({ where: { userId: req.telegramUser!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
   res.json(jsonSafe(withdrawals));
+});
+userRouter.get('/withdrawals/:id', async (req, res) => {
+  const withdrawal = await prisma.withdrawal.findFirst({ where: { id: String(req.params.id), userId: req.telegramUser!.id } });
+  if (!withdrawal) { res.status(404).json({ error: 'Withdrawal not found', code: 'WITHDRAWAL_NOT_FOUND' }); return; }
+  res.json(jsonSafe(withdrawal));
 });

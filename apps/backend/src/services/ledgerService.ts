@@ -60,6 +60,55 @@ export async function creditWallet(
   return { availableMinor, entryId: entry.id };
 }
 
+export async function reserveWallet(
+  tx: Transaction,
+  userId: string,
+  amountMinor: bigint,
+  type: LedgerType,
+  referenceType: string,
+  referenceId: string
+): Promise<{ availableMinor: bigint; lockedMinor: bigint; entryId: string }> {
+  if (amountMinor <= 0n) throw new AppError(400, 'Reserve amount must be positive', 'INVALID_AMOUNT');
+  const wallet = await lockWallet(tx, userId);
+  if (wallet.availableMinor < amountMinor) throw new AppError(400, 'Insufficient available balance', 'INSUFFICIENT_BALANCE');
+  const availableMinor = wallet.availableMinor - amountMinor;
+  const lockedMinor = wallet.lockedMinor + amountMinor;
+  await tx.walletAccount.update({ where: { id: wallet.id }, data: { availableMinor, lockedMinor, version: { increment: 1 } } });
+  const entry = await tx.ledgerEntry.create({ data: {
+    userId, amountMinor, type, direction: LedgerDirection.DEBIT, balanceAfterMinor: availableMinor, referenceType, referenceId
+  } });
+  return { availableMinor, lockedMinor, entryId: entry.id };
+}
+
+export async function settleReservedWallet(tx: Transaction, userId: string, amountMinor: bigint): Promise<bigint> {
+  if (amountMinor <= 0n) throw new AppError(400, 'Settlement amount must be positive', 'INVALID_AMOUNT');
+  const wallet = await lockWallet(tx, userId);
+  if (wallet.lockedMinor < amountMinor) throw new AppError(409, 'Reserved withdrawal balance is inconsistent', 'RESERVATION_MISSING');
+  const lockedMinor = wallet.lockedMinor - amountMinor;
+  await tx.walletAccount.update({ where: { id: wallet.id }, data: { lockedMinor, version: { increment: 1 } } });
+  return lockedMinor;
+}
+
+export async function releaseReservedWallet(
+  tx: Transaction,
+  userId: string,
+  amountMinor: bigint,
+  type: LedgerType,
+  referenceType: string,
+  referenceId: string
+): Promise<{ availableMinor: bigint; lockedMinor: bigint; entryId: string }> {
+  if (amountMinor <= 0n) throw new AppError(400, 'Release amount must be positive', 'INVALID_AMOUNT');
+  const wallet = await lockWallet(tx, userId);
+  if (wallet.lockedMinor < amountMinor) throw new AppError(409, 'Reserved withdrawal balance is inconsistent', 'RESERVATION_MISSING');
+  const availableMinor = wallet.availableMinor + amountMinor;
+  const lockedMinor = wallet.lockedMinor - amountMinor;
+  await tx.walletAccount.update({ where: { id: wallet.id }, data: { availableMinor, lockedMinor, version: { increment: 1 } } });
+  const entry = await tx.ledgerEntry.create({ data: {
+    userId, amountMinor, type, direction: LedgerDirection.CREDIT, balanceAfterMinor: availableMinor, referenceType, referenceId
+  } });
+  return { availableMinor, lockedMinor, entryId: entry.id };
+}
+
 export async function writeAudit(
   tx: Transaction,
   input: { actorId?: string; action: string; entityType: string; entityId: string; before?: unknown; after?: unknown; ipAddress?: string }

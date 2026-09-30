@@ -7,7 +7,7 @@ import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { adminAuth, requireAdminRole } from '../middleware/adminAuth';
 import { rateLimit } from '../middleware/rateLimit';
-import { approveWithdrawal, retryWithdrawal } from '../services/withdrawalService';
+import { approveWithdrawal, rejectWithdrawal, retryWithdrawal } from '../services/withdrawalService';
 import { tronGateway } from '../services/tronGateway';
 import { creditWallet, writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
@@ -15,6 +15,7 @@ import { jsonSafe, parseUsdtToMinor } from '@red-envelope/shared';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
 import { AppError } from '../utils/errors';
+import { verifyTotp } from '../utils/totp';
 
 export const adminRouter = Router();
 
@@ -23,6 +24,7 @@ adminRouter.post('/auth/login', rateLimit('admin-login', 10), async (req, res) =
   const admin = await prisma.adminUser.findUnique({ where: { username: payload.username } });
   if (!admin || !(await bcrypt.compare(payload.password, admin.passwordHash))) { res.status(401).json({ error: 'Invalid admin credentials' }); return; }
   if (admin.mfaSecret && !payload.mfaCode) { res.status(401).json({ error: 'MFA code required', code: 'MFA_REQUIRED' }); return; }
+  if (admin.mfaSecret && !verifyTotp(admin.mfaSecret, payload.mfaCode ?? '')) { res.status(401).json({ error: 'Invalid MFA code', code: 'MFA_INVALID' }); return; }
   const token = jwt.sign({ sub: admin.id, role: admin.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn as jwt.SignOptions['expiresIn'] });
   res.json({ token, admin: { id: admin.id, username: admin.username, role: admin.role } });
 });
@@ -182,7 +184,26 @@ adminRouter.get('/withdrawals', async (req, res) => {
 });
 adminRouter.post('/withdrawals/:id/approve', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => res.json(jsonSafe(await approveWithdrawal(String(req.params.id), req.adminUser!.id, req.ip))));
 adminRouter.post('/withdrawals/:id/retry', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => res.json(jsonSafe(await retryWithdrawal(String(req.params.id), req.adminUser!.id, req.ip))));
+adminRouter.post('/withdrawals/:id/reject', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => {
+  const { reason } = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body);
+  res.json(jsonSafe(await rejectWithdrawal(String(req.params.id), req.adminUser!.id, reason, req.ip)));
+});
 
+adminRouter.get('/deposits', async (req, res) => {
+  const status = req.query.status ? z.enum(['PENDING', 'CONFIRMED', 'FAILED']).parse(String(req.query.status)) : undefined;
+  const deposits = await prisma.deposit.findMany({
+    where: { status },
+    include: { user: { select: { telegramId: true, username: true, firstName: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 100
+  });
+  res.json(jsonSafe(deposits));
+});
+
+adminRouter.get('/emergency/status', async (_req, res) => {
+  const [withdrawals, envelopes] = await Promise.all([redis.get('emergency:withdrawals-disabled'), redis.get('emergency:envelopes-disabled')]);
+  res.json({ withdrawalsDisabled: withdrawals === '1', envelopesDisabled: envelopes === '1' });
+});
 adminRouter.post('/emergency/disable-withdrawals', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), async (req, res) => {
   const disabled = z.object({ disabled: z.boolean().default(true) }).parse(req.body).disabled;
   if (disabled) await redis.set('emergency:withdrawals-disabled', '1'); else await redis.del('emergency:withdrawals-disabled');

@@ -18,6 +18,9 @@ export async function recordIncomingTransfer(userId: string, transfer: IncomingT
       userId,
       amountMinor: transfer.amountMinor,
       fromAddress: transfer.fromAddress,
+      toAddress: transfer.toAddress,
+      tokenContract: config.tron.usdtContract,
+      detectedAt: new Date(transfer.timestamp),
       confirmations: transfer.confirmations,
       status: DepositStatus.PENDING
     } });
@@ -31,7 +34,7 @@ export async function recordIncomingTransfer(userId: string, transfer: IncomingT
     const latest = await tx.deposit.findUnique({ where: { id: deposit.id } });
     if (!latest || latest.status === DepositStatus.CONFIRMED) return latest ?? deposit;
     const credit = await creditWallet(tx, userId, latest.amountMinor, LedgerType.DEPOSIT, 'DEPOSIT', latest.id);
-    const confirmed = await tx.deposit.update({ where: { id: latest.id }, data: { confirmations, status: DepositStatus.CONFIRMED } });
+    const confirmed = await tx.deposit.update({ where: { id: latest.id }, data: { confirmations, status: DepositStatus.CONFIRMED, confirmedAt: new Date() } });
     await writeAudit(tx, { action: 'DEPOSIT_CONFIRMED', entityType: 'Deposit', entityId: confirmed.id, after: { txHash: confirmed.txHash, amountMinor: latest.amountMinor.toString(), balanceAfterMinor: credit.availableMinor.toString() } });
     return confirmed;
   }, { isolationLevel: 'ReadCommitted' });
