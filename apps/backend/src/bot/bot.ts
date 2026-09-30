@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config } from '../config';
 import { redis } from '../lib/redis';
+import { prisma } from '../lib/prisma';
 import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../services/ledgerService';
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
@@ -42,9 +43,12 @@ export function createTelegramBot(): Bot {
 
   bot.command('start', async (ctx) => {
     await ensureWalletForTelegram(telegramIdentity(ctx));
-    const keyboard = new InlineKeyboard().webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl);
+    const keyboard = new InlineKeyboard()
+      .text('💰 Balance', 'menu:balance').text('📜 History', 'menu:history').row()
+      .text('↓ Deposit', 'menu:deposit').webApp('↑ Withdraw', config.publicAppUrl).row()
+      .webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl).text('❓ Help', 'menu:help');
     await ctx.reply(
-      'Welcome to Red Envelope Wallet 🧧\n\nYour custodial wallet is ready. Tap below to open the Mini App.',
+      `Welcome to Red Envelope Wallet 🧧\n\nYour account is secured by Telegram ID ${ctx.from?.id}. Your display name and @username are profile labels only and never identify financial ownership.`,
       { reply_markup: keyboard }
     );
   });
@@ -82,18 +86,29 @@ export function createTelegramBot(): Bot {
   bot.command('balance', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const wallet = await getWalletSummary(user.id);
-    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked: ${formatMinor(wallet.lockedMinor)} USDT`);
+    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`);
   });
 
   bot.command('deposit', async (ctx) => {
-    await ensureWalletForTelegram(telegramIdentity(ctx));
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    if (config.fundsMode !== 'real') {
+      await ctx.reply('Test mode is active. Blockchain deposits are disabled; ask an administrator to add test USDT.');
+      return;
+    }
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } });
     await ctx.reply(
-      `Send USDT on TRC20 to:\n<code>${config.tron.hotWalletAddress || 'Deposit address is being provisioned'}</code>\n\nDeposits are credited after ${config.tron.confirmations} confirmations. Always verify the network.`,
+      account?.depositAddress
+        ? `Send only USDT on TRC20 to your assigned address:\n<code>${account.depositAddress}</code>\n\nDeposits are credited after ${config.tron.confirmations} confirmations.`
+        : 'Your unique deposit address has not been provisioned. Contact support.',
       { parse_mode: 'HTML' }
     );
   });
 
   bot.command('withdraw', async (ctx) => {
+    if (!config.chainOperationsEnabled) {
+      await ctx.reply('Test mode is active. Blockchain withdrawals are disabled. Test balance can only be used for test red envelopes.');
+      return;
+    }
     const keyboard = new InlineKeyboard().webApp('🧧 Open Wallet', config.publicAppUrl);
     await ctx.reply(
       'Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.',
@@ -139,6 +154,33 @@ export function createTelegramBot(): Bot {
     }
   });
 
+  bot.callbackQuery('menu:balance', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const wallet = await getWalletSummary(user.id);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`);
+  });
+  bot.callbackQuery('menu:history', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const ledger = await getLedger(user.id, 10);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : 'No ledger activity yet.');
+  });
+  bot.callbackQuery('menu:deposit', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    await ctx.answerCallbackQuery();
+    if (config.fundsMode !== 'real') {
+      await ctx.reply('Test mode is active. Blockchain deposits and withdrawals are disabled; ask an administrator to add test USDT.');
+      return;
+    }
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } });
+    await ctx.reply(account?.depositAddress ? `Send only USDT TRC20 to your assigned address:\n<code>${account.depositAddress}</code>\n\nCredit requires ${config.tron.confirmations} confirmations.` : 'Your unique deposit address has not been provisioned. Contact support.', { parse_mode: 'HTML' });
+  });
+  bot.callbackQuery('menu:help', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Use Balance and History to inspect your internal USDT ledger. Open Wallet to create envelopes or request a withdrawal. Never share a seed phrase or private key—the bot will never ask for one.');
+  });
+
   bot.callbackQuery(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i, async (ctx) => {
     const envelopeId = ctx.callbackQuery.data;
     try {
@@ -147,7 +189,7 @@ export function createTelegramBot(): Bot {
       await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
       const result = await claimEnvelope(user.id, envelopeId);
       await ctx.answerCallbackQuery({
-        text: `You claimed ${formatMinor(result.claim.amountMinor)} USDT! Open the wallet to see your balance.`,
+        text: `You claimed ${formatMinor(result.claim.amountMinor)} USDT! New available balance: ${formatMinor(result.availableMinor)} USDT.`,
         show_alert: true
       });
       const latestEnvelope = await getEnvelope(envelopeId);

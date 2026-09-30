@@ -68,16 +68,27 @@ export class TronGateway {
     return match?.transaction_id;
   }
 
-  async pollIncomingTransfers(sinceMs: number): Promise<IncomingTransfer[]> {
-    if (!config.tron.hotWalletAddress) return [];
+  async pollIncomingTransfers(address: string, sinceMs: number): Promise<IncomingTransfer[]> {
+    if (!address) return [];
     const params = new URLSearchParams({ limit: '200', only_confirmed: 'false', contract_address: config.tron.usdtContract, min_timestamp: String(sinceMs) });
-    const response = await fetch(`${config.tron.fullHost}/v1/accounts/${config.tron.hotWalletAddress}/transactions/trc20?${params.toString()}`, { headers: this.headers() });
+    const response = await fetch(`${config.tron.fullHost}/v1/accounts/${address}/transactions/trc20?${params.toString()}`, { headers: this.headers() });
     if (!response.ok) throw new Error(`TronGrid returned ${response.status}`);
     const payload = await response.json() as TronTransferResponse;
     const currentBlock = await this.getCurrentBlock();
-    return (payload.data ?? []).filter((transfer) => transfer.to === config.tron.hotWalletAddress && transfer.transaction_id && transfer.from && transfer.value)
-      .map((transfer) => ({ txHash: transfer.transaction_id as string, fromAddress: transfer.from as string, toAddress: transfer.to as string, amountMinor: BigInt(transfer.value as string), timestamp: transfer.block_timestamp ?? Date.now(), confirmations: 0 }))
-      .map((transfer) => ({ ...transfer, confirmations: currentBlock > 0 ? config.tron.confirmations : 0 }));
+    const transfers = (payload.data ?? []).filter((transfer) => transfer.to === address && transfer.transaction_id && transfer.from && transfer.value);
+    return Promise.all(transfers.map(async (transfer) => {
+      const txHash = transfer.transaction_id as string;
+      const info = await this.getTransactionInfo(txHash).catch(() => undefined);
+      const confirmations = info?.blockNumber === undefined || currentBlock <= 0 ? 0 : Math.max(0, currentBlock - info.blockNumber + 1);
+      return {
+        txHash,
+        fromAddress: transfer.from as string,
+        toAddress: transfer.to as string,
+        amountMinor: BigInt(transfer.value as string),
+        timestamp: transfer.block_timestamp ?? Date.now(),
+        confirmations
+      };
+    }));
   }
 }
 

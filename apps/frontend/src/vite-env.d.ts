@@ -2,7 +2,7 @@
 
 declare global {
   type TelegramSafeAreaInset = { top: number; right: number; bottom: number; left: number };
-  type TelegramWebAppEvent = 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged' | 'fullscreenChanged' | 'fullscreenFailed';
+  type TelegramWebAppEvent = 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged' | 'fullscreenChanged' | 'fullscreenFailed' | 'themeChanged';
 
   interface TelegramWebApp {
     initData: string;
@@ -21,6 +21,7 @@ declare global {
     exitFullscreen?: () => void;
     close: () => void;
     enableClosingConfirmation: () => void;
+    enableVerticalSwipes?: () => void;
     disableVerticalSwipes?: () => void;
     isClosingConfirmationEnabled?: boolean;
     setHeaderColor?: (color: string) => void;

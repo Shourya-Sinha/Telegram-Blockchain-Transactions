@@ -2,6 +2,8 @@
 
 This guide describes what a red envelope means in this repository and the exact Telegram flow.
 
+> For the accounting side — whose wallet is debited, when, and why a claim never produces a blockchain transaction — see [`MONEY_FLOW.md`](MONEY_FLOW.md).
+
 ## 1. What a red envelope is
 
 A red envelope is a prepaid distribution of the app's **internal USDT balance**:
@@ -29,6 +31,10 @@ These roles are easy to confuse:
 - **Telegram group member:** sees the bot's message and taps the claim button. A member does not need to be a control-room admin.
 
 A regular funded user can also send from the Mini App's **DeFi** tab or run `/redpacket` in a group. That envelope is paid from that user's own balance.
+
+### Telegram ID versus name
+
+The numeric Telegram user ID is the immutable external account key and is unique in the database. Signed Telegram updates and validated Mini App init data supply that ID. The display name and optional `@username` are stored only to make bot messages and admin screens understandable; users can change them, so neither is used to own a wallet, authorize a claim, or locate financial records. Internally, wallet and ledger rows reference the application's UUID user ID.
 
 ## 3. Configure the bot and webhook
 
@@ -99,16 +105,42 @@ This repository includes an explicitly guarded development helper so the full in
 
 ```dotenv
 NODE_ENV=development
+FUNDS_MODE=test
+DEPOSIT_MODE=disabled
 ALLOW_DEV_CREDIT=true
+DEV_AUTO_CREDIT_USDT=1000
 ```
 
-Then, after the treasury user has sent `/start`:
+With `DEV_AUTO_CREDIT_USDT=1000`, each user receives 1,000 test USDT exactly once on their first `/start` or Mini App `/me` request. The immutable `DEV_CREDIT` ledger marker and wallet row lock prevent refreshes or concurrent requests from granting it twice. Set the value to `0` when automatic funding is not wanted.
 
-```bash
-npm run db:dev-credit -- 123456789 100
+For additional test funds, use either method:
+
+- In **Admin → Users**, find the Telegram user, open **Transactions**, enter an amount and reason under **Add test USDT**, then confirm. The form defaults to 1,000 USDT, permits up to 10,000 per audited action, and can be used again when more test funds are needed.
+- Or use the command line:
+
+  ```bash
+  npm run db:dev-credit -- 123456789 100
+  ```
+
+The admin control is restricted to `SUPER_ADMIN` and `FINANCE` roles, accepts at most 10,000 USDT per action, and is hard-disabled whenever `NODE_ENV=production`. Every credit atomically increases the available internal balance, creates a `TRANSFER / CREDIT` ledger entry with reference type `DEV_CREDIT`, and writes `DEV_WALLET_CREDITED` to the admin audit log with the operator, reason, IP address, previous balance, and new balance.
+
+This is **not a blockchain transaction** and adds no real USDT to the hot wallet. In `FUNDS_MODE=test`, blockchain deposit scanners, withdrawal workers, user deposits, and user withdrawals are disabled, so test liabilities cannot drain a real wallet.
+
+### Switching to real funds
+
+Funds mode is deliberately controlled by the deployment environment—not by an admin-panel switch. Allowing a logged-in operator to turn test balances into withdrawable real liabilities would create a critical wallet-drain risk. The admin panel clearly displays **TEST MODE** or **REAL FUNDS**, but changing modes requires an reviewed configuration change and backend restart.
+
+A real deployment requires:
+
+```dotenv
+NODE_ENV=production
+FUNDS_MODE=real
+DEPOSIT_MODE=unique
+ALLOW_DEV_CREDIT=false
+DEV_AUTO_CREDIT_USDT=0
 ```
 
-This creates an audited `DEV_CREDIT` ledger entry for 100 test USDT. Never enable or run this helper in staging or production; it creates an unbacked test balance.
+It also requires all production secrets and TRON wallet settings. Startup fails closed if real mode is incomplete, if test credit is enabled in production, or if deposits are not configured for unique addresses. `DEPOSIT_MODE=unique` uses each user's `User.depositAddress`; addresses must first be provisioned by reviewed self-custody/key-management infrastructure or a custody provider. The shared hot-wallet address is never returned as a production user deposit address.
 
 ### Production deposit warning
 
@@ -226,11 +258,21 @@ Check the alert shown by Telegram. Common causes are already claimed, envelope c
 - Confirm Redis is running.
 - Send new messages after the bot is present; historical Telegram messages are not imported.
 
-## 11. Mini App fullscreen behavior
+## 11. Mini App sheet behavior (no full-screen takeover)
 
-The frontend calls Telegram's `expand()` API for older clients and `requestFullscreen()` for Telegram Mini Apps 8.0+ clients. It also listens for Telegram viewport and safe-area changes so content does not sit under an iPhone notch, Android status area, or bottom gesture bar.
+The Mini App never paints edge to edge. It renders as a **bottom sheet that rises from the bottom and covers 80% of the viewport Telegram reports**, with curved top-left/top-right corners and a small grab handle. The remaining 20% at the top is left uncovered and is painted with Telegram's own `secondary_bg_color`, so the app reads as a panel inside Telegram instead of an external full-screen page.
 
-If an older Telegram client does not implement true fullscreen, Telegram may keep its native header visible. A web app cannot forcibly remove native Telegram chrome in that case; update Telegram and reopen the Mini App. Also make sure the app is opened with the bot's **Open Red Envelope Wallet** Web App button, not by pasting the frontend URL into Telegram's ordinary in-app browser.
+Key points:
+
+- The sheet is measured against `Telegram.WebApp.viewportStableHeight`, never the physical screen. A phone, a small Telegram Desktop window and a maximised Telegram Desktop window all get the same proportional sheet.
+- `expand()` and `requestFullscreen()` are never called. If Telegram restores the WebView in fullscreen, the frontend calls `exitFullscreen()` — and it does so again on every `fullscreenChanged` event, so the client cannot silently re-enter fullscreen.
+- On Telegram for Android/iOS an un-expanded Mini App is *already* a native partial sheet with the chat visible above it. On those clients the document fills the WebView (`body[data-sheet="native"]`) so the gap is not applied twice; Telegram keeps owning the sheet geometry.
+- Everything that used to be `position: fixed` — the bottom navigation, the claim/deposit/withdraw modals, the ambient glows, the build indicator — is now scoped inside the sheet, so no overlay can paint over the strip that is deliberately left free.
+- Content scrolls inside the sheet (`.screen`), with `overscroll-behavior: contain` so a scroll never chains out to the Telegram client.
+
+Sizing knobs live in one place: `SHEET_HEIGHT_RATIO` in `apps/frontend/src/telegram.ts` (default `0.8`) and the `--app-sheet-height` / `--app-sheet-radius` CSS variables it writes.
+
+Telegram still controls the *outer* window on desktop; a web app cannot resize the Telegram Desktop Mini App window itself. The 80/20 split and the rounded top corners are therefore drawn by the app inside whatever viewport Telegram hands it. Make sure it is opened with the bot's **Open Red Envelope Wallet** Web App button rather than by pasting the frontend URL into Telegram's ordinary in-app browser.
 
 ## 12. Does the transaction design fit the requirement?
 
