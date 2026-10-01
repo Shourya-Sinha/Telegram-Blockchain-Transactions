@@ -58,6 +58,7 @@ adminRouter.get('/envelopes/setup', async (_req, res) => {
   });
   res.json(jsonSafe({
     configured: Boolean(rawTreasuryId && treasury?.wallet && treasury.status === 'ACTIVE'),
+    treasuryTelegramIdConfigured: /^\d+$/.test(rawTreasuryId),
     configurationMessage: !rawTreasuryId
       ? 'Set RED_ENVELOPE_TREASURY_TELEGRAM_ID, then restart the backend.'
       : !treasury?.wallet

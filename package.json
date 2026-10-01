@@ -6,6 +6,7 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "build": "npm run build --workspace=@red-envelope/shared && npm run build --workspace=@red-envelope/backend && npm run build --workspace=@red-envelope/frontend && npm run build --workspace=@red-envelope/admin",
+    "predev": "npm run db:generate && npm run build --workspace=@red-envelope/shared",
     "dev": "concurrently -n backend,frontend,admin -c blue,green,magenta \"npm run dev --workspace=@red-envelope/backend\" \"npm run dev --workspace=@red-envelope/frontend\" \"npm run dev --workspace=@red-envelope/admin\"",
     "db:generate": "npm run prisma:generate --workspace=@red-envelope/backend",
     "db:migrate": "npm run prisma:migrate --workspace=@red-envelope/backend",

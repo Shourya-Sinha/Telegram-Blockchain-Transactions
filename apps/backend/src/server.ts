@@ -69,33 +69,44 @@ const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
 };
 app.use(errorHandler);
 
-// if (config.nodeEnv !== 'test') {
-//   startWorkers();
-//   const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
-//   if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
-//     void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
-//   }
-//   const shutdown = () => { server.close(() => process.exit(0)); };
-//   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
-// }
+function isPublicTelegramWebhook(value: string): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 if (config.nodeEnv !== 'test') {
   startWorkers();
+  let polling = false;
 
   const server = app.listen(config.port, '0.0.0.0', async () => {
     console.log(`[backend] listening on 0.0.0.0:${config.port}`);
 
-    if (!bot) return;
+    if (!bot) {
+      console.warn('[telegram] BOT_TOKEN is not set; bot commands are disabled');
+      return;
+    }
 
     try {
       await bot.init();
       console.log('[telegram] bot initialized');
 
-      if (process.env.TELEGRAM_WEBHOOK_URL) {
-        await bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, {
+      if (isPublicTelegramWebhook(config.telegramWebhookUrl)) {
+        await bot.api.setWebhook(config.telegramWebhookUrl, {
           secret_token: config.telegramWebhookSecret
         });
-
-        console.log('[telegram] webhook configured');
+        console.log(`[telegram] webhook configured: ${config.telegramWebhookUrl}`);
+      } else {
+        // Telegram cannot deliver updates to localhost. Long polling makes the
+        // documented local setup work without ngrok or another HTTPS tunnel.
+        await bot.api.deleteWebhook();
+        polling = true;
+        console.log('[telegram] local/non-public webhook URL detected; using long polling');
+        void bot.start().catch((error) => console.error('[telegram-polling]', error));
       }
     } catch (error) {
       console.error('[telegram] startup failed', error);
@@ -103,6 +114,7 @@ if (config.nodeEnv !== 'test') {
   });
 
   const shutdown = () => {
+    if (polling) bot?.stop();
     server.close(() => process.exit(0));
   };
 
