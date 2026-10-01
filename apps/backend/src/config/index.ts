@@ -1,4 +1,29 @@
-import 'dotenv/config';
+import { existsSync } from 'node:fs';
+import { dirname, join, parse, resolve } from 'node:path';
+import { config as loadDotenv } from 'dotenv';
+
+/**
+ * npm runs workspace scripts with the workspace as cwd, while the documented
+ * .env file lives at the repository root. Walk upwards so the same file is
+ * loaded whether the backend is started from the root, apps/backend, or dist.
+ * Existing process environment values still take precedence.
+ */
+function findEnvFile(start: string): string | undefined {
+  let directory = resolve(start);
+  const root = parse(directory).root;
+  while (true) {
+    const candidate = join(directory, '.env');
+    if (existsSync(candidate)) return candidate;
+    if (directory === root) return undefined;
+    directory = dirname(directory);
+  }
+}
+
+const envFile = [process.cwd(), process.env.INIT_CWD, __dirname]
+  .filter((value): value is string => Boolean(value))
+  .map(findEnvFile)
+  .find((value): value is string => Boolean(value));
+loadDotenv(envFile ? { path: envFile } : undefined);
 
 const number = (key: string, fallback: number): number => {
   const value = process.env[key];
@@ -24,6 +49,7 @@ export const config = {
   redisUrl: required('REDIS_URL', 'redis://localhost:6379'),
   botToken: required('BOT_TOKEN'),
   telegramWebhookSecret: required('TELEGRAM_WEBHOOK_SECRET', 'development-webhook-secret'),
+  telegramWebhookUrl: required('TELEGRAM_WEBHOOK_URL'),
   telegramInitDataMaxAge: number('TELEGRAM_INIT_DATA_MAX_AGE_SECONDS', 86400),
   publicAppUrl: required('PUBLIC_APP_URL', 'http://localhost:5173'),
   corsOrigins: required('CORS_ORIGINS', 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
