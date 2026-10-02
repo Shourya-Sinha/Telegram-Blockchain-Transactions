@@ -105,6 +105,26 @@ Two separate things were going on:
 **`BUTTON_TYPE_INVALID` when a command or envelope is used in a group.**
 Telegram allows native `web_app` (Mini App) buttons in **private chats only** — attaching one to a group message makes Telegram reject the entire message. All group-facing keyboards therefore use a `t.me/<bot>?start=wallet` deep link instead: one tap opens the bot's private chat, where `/start wallet` replies with the balance and the native Mini App buttons. Private-chat messages keep the real `web_app` buttons. `chatAppKeyboard(label, chatType)` in `src/services/telegramService.ts` centralizes the choice, and the tests in `src/utils/groupKeyboard.test.ts` fail the build if a group-posted message ever carries a `web_app` button again.
 
+As a last line of defense, `installGroupButtonGuard(bot)` installs a grammY API transformer that inspects **every** outgoing Telegram call: any `web_app` button still aimed at a group or channel (negative chat id) is automatically converted to the bot's `t.me` wallet deep link — or dropped if the bot username is not yet known — so the message always stays deliverable. When the backend starts you should see:
+
+```
+[telegram] group button guard active — web_app buttons cannot reach group messages
+```
+
+If you still see `BUTTON_TYPE_INVALID` but your console does **not** show that line, the running process is on old or locally modified code — pull the branch and restart (see below).
+
+**Updating a machine with local modifications.**
+If your working tree has local edits (for example hand-added debug logging like `[telegram] CHAT ID …` — these lines do not exist in the repository), the fixes on the branch are not what is running. Update with:
+
+```bash
+git stash                 # or commit your local logging changes
+git pull origin arena/01a0fd71-telegram-blockchain-transactio
+# resolve any conflicts by keeping the chatAppKeyboard/installGroupButtonGuard code
+npm run dev --workspace=@red-envelope/backend   # or rebuild + restart for production
+```
+
+Then run `/start` in the group again and confirm the reply arrives with the wallet button.
+
 **Funding the treasury without the CLI.**
 The admin console's **Send envelope** page shows the treasury balance and, in test mode with `ALLOW_DEV_CREDIT=true`, an inline **Add test USDT to treasury** form — the same audited ledger operation as `npm run db:dev-credit -- <treasury-telegram-id> <amount>`, without leaving the panel.
 

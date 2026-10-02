@@ -6,7 +6,7 @@ import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../service
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { registerTelegramGroup } from '../services/groupService';
-import { assertTelegramGroupMembership, chatAppKeyboard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot, walletDeepLink } from '../services/telegramService';
+import { assertTelegramGroupMembership, chatAppKeyboard, installGroupButtonGuard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot, walletDeepLink } from '../services/telegramService';
 import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
 import { botTexts, normalizeLocale } from './texts';
@@ -38,6 +38,11 @@ export function createTelegramBot(): Bot {
   if (!config.botToken) throw new Error('BOT_TOKEN is required to start the Telegram bot');
   const bot = new Bot(config.botToken);
   registerTelegramBot(bot);
+  // Telegram rejects web_app (Mini App) buttons outside private chats with
+  // BUTTON_TYPE_INVALID and drops the WHOLE message. Every keyboard helper
+  // already picks a t.me deep link for groups; this guard rewrites anything
+  // that slips through anyway, so a group message can never be rejected.
+  installGroupButtonGuard(bot);
 
   bot.use(async (ctx, next) => {
     try {

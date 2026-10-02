@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { rewriteGroupWebAppButtons } from '../services/telegramService';
 
 const read = (relativePath: string): string => readFileSync(resolve(process.cwd(), relativePath), 'utf8');
 
@@ -35,4 +36,42 @@ test('the claim keyboard edit on a group envelope message uses a deep link, not 
   assert.equal(claimHandler.includes('walletDeepLink()'), true);
   // Every command that can be typed inside a group must pick its keyboard by chat type.
   assert.match(source, /chatAppKeyboard\(texts\.(walletGroupButton|historyButton|walletDetailsButton), ctx\.chat(\?)?\.(type|type)\)/);
+});
+
+test('the bot installs the group button guard on every outgoing Telegram call', () => {
+  const source = read('src/bot/bot.ts');
+  assert.match(source, /installGroupButtonGuard\(bot\)/);
+});
+
+test('rewriteGroupWebAppButtons converts a web_app button aimed at a group into a t.me deep link', () => {
+  const payload = {
+    chat_id: -1003589890000,
+    reply_markup: { inline_keyboard: [[{ text: '💰 Open My Wallet', web_app: { url: 'https://example.com' } }]] }
+  };
+  const patched = rewriteGroupWebAppButtons(payload, 'https://t.me/mybot?start=wallet');
+  assert.notEqual(patched, payload);
+  const button = (patched as typeof payload).reply_markup.inline_keyboard[0][0] as unknown as { text: string; url: string };
+  assert.equal(button.text, '💰 Open My Wallet');
+  assert.equal(button.url, 'https://t.me/mybot?start=wallet');
+  assert.equal('web_app' in button, false);
+});
+
+test('rewriteGroupWebAppButtons drops the button when no deep link is available but keeps the message deliverable', () => {
+  const payload = {
+    chat_id: '-1001234567890',
+    reply_markup: { inline_keyboard: [[{ text: 'Open', web_app: { url: 'https://example.com' } }, { text: 'Claim', callback_data: 'x' }]] }
+  };
+  const patched = rewriteGroupWebAppButtons(payload, undefined);
+  const row = (patched as typeof payload).reply_markup.inline_keyboard[0] as Array<Record<string, unknown>>;
+  assert.equal(row.length, 1);
+  assert.equal('callback_data' in row[0], true);
+});
+
+test('rewriteGroupWebAppButtons leaves private chats and web_app-free group messages untouched', () => {
+  const privatePayload = { chat_id: 700000001, reply_markup: { inline_keyboard: [[{ text: 'Open', web_app: { url: 'https://example.com' } }]] } };
+  assert.equal(rewriteGroupWebAppButtons(privatePayload, 'https://t.me/x'), privatePayload);
+  const plainGroupPayload = { chat_id: -1003589890000, reply_markup: { inline_keyboard: [[{ text: 'Claim', callback_data: 'x' }]] } };
+  assert.equal(rewriteGroupWebAppButtons(plainGroupPayload, 'https://t.me/x'), plainGroupPayload);
+  const noKeyboard = { chat_id: -1003589890000, text: 'hello' };
+  assert.equal(rewriteGroupWebAppButtons(noKeyboard, 'https://t.me/x'), noKeyboard);
 });
