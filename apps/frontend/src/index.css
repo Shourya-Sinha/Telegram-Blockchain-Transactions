@@ -52,3 +52,11 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 .status-completed { color: #6fe0ac; background: rgba(54, 190, 131, .13); }
 .status-failed, .status-rejected { color: #ffaaa8; background: rgba(231, 94, 94, .12); }
 .status-processing, .status-broadcast, .status-confirming, .status-queued { color: #eecf85; background: rgba(224, 173, 75, .12); }
+
+/* Flag language selector (🇬🇧 EN / 🇨🇳 ZH) shown in each screen topbar. */
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.lang-switcher { display: flex; gap: 4px; padding: 3px; border: 1px solid #22364d; border-radius: 11px; background: rgba(10, 21, 35, .72); }
+.lang-btn { display: flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 8px; color: #7f93a9; background: transparent; font-size: 9px; font-weight: 750; letter-spacing: .05em; transition: color .2s, background .2s; }
+.lang-btn .lang-flag { font-size: 13px; line-height: 1; }
+.lang-btn.active { color: #cfe4f7; background: rgba(90, 156, 227, .18); box-shadow: inset 0 0 0 1px rgba(120, 178, 236, .35); }
+.lang-btn:not(.active):active { transform: scale(.94); }

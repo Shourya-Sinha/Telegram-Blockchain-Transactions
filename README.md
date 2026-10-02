@@ -81,7 +81,7 @@ The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend
 6. Add the bot to each destination group, promote it so it can send/edit messages and verify membership, then run `/registergroup` in that group.
 7. Run `/myid` from the funded treasury Telegram account and set that number as `RED_ENVELOPE_TREASURY_TELEGRAM_ID` to enable admin-created envelopes.
 
-The bot supports `/start`, `/wallet`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Every envelope message carries a `💰 Open My Wallet` button, and each successful claim triggers a private message with the claimer's wallet details and a Mini App button. See the [user guide](docs/USER_GUIDE.md) for the complete user-facing flow, the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow, and the [requirements status](docs/REQUIREMENTS_STATUS.md) for an honest implemented/partial/production-gate matrix.
+The bot supports `/start`, `/wallet`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/lang en|zh`, `/help`, and `/redpacket <amount> <count>`. Every envelope message carries a bilingual `💰 Open My Wallet · 打开钱包` button, and each successful claim triggers a private message with the claimer's wallet details and a Mini App button. `/wallet` and `/start` also work inside groups: the group reply shows only the Mini App launcher while wallet details go to the user's private chat. The Mini App and the admin console both include a 🇬🇧 EN / 🇨🇳 ZH flag selector; the Mini App choice is stored on the user record (`User.locale`) and the bot localizes its messages to match. See the [user guide](docs/USER_GUIDE.md) for the complete user-facing flow, the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow, and the [requirements status](docs/REQUIREMENTS_STATUS.md) for an honest implemented/partial/production-gate matrix.
 
 ## Tron / deposits / withdrawals
 
@@ -134,7 +134,7 @@ In `FUNDS_MODE=test` the withdrawal button is disabled unless you set `TEST_WITH
 
 TMA routes use `X-Telegram-Init-Data`:
 
-- `GET /api/me` (includes `fundsMode`, `withdrawalMode` — `real` / `test` / `disabled` — plus `withdrawalMinMinor`, `withdrawalFeeMinor`, `testWithdrawalAddress` and `testCurrencyWarning` in test mode), `/api/wallet`, `/api/ledger`, `/api/deposit/address`, `/api/deposits`
+- `GET /api/me` (includes `fundsMode`, `withdrawalMode` — `real` / `test` / `disabled` — plus `withdrawalMinMinor`, `withdrawalFeeMinor`, `testWithdrawalAddress`, `testCurrencyWarning` in test mode, and the stored `locale`), `/api/wallet`, `/api/ledger`, `/api/deposit/address`, `/api/deposits`, `POST /api/locale` (persist the 🇬🇧/🇨🇳 flag choice; the bot reads it for localized messages)
 - `POST /api/envelopes`, `GET /api/envelopes/:id`, `POST /api/envelopes/:id/claim`
 - `POST /api/withdrawals`, `GET /api/withdrawals`, `GET /api/withdrawals/:id`
 

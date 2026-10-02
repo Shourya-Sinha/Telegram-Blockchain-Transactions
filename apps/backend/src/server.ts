@@ -112,11 +112,12 @@ if (config.nodeEnv !== 'test') {
       try {
         await bot.api.setMyCommands([
           { command: 'start', description: 'Open the start menu and your wallet' },
-          { command: 'wallet', description: 'Open the Mini App wallet' },
+          { command: 'wallet', description: 'Open the Mini App wallet (works in groups)' },
           { command: 'balance', description: 'View available and locked balance' },
           { command: 'history', description: 'Recent ledger activity' },
           { command: 'deposit', description: 'Get the TRC20 deposit address' },
           { command: 'withdraw', description: 'Submit a withdrawal request' },
+          { command: 'lang', description: 'Switch language / 切换语言 (en or zh)' },
           { command: 'redpacket', description: 'Send a red envelope in a group' },
           { command: 'registergroup', description: 'Register this group for envelopes' },
           { command: 'myid', description: 'Show your Telegram ID' },

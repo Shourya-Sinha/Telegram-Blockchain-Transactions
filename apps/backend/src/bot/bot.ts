@@ -7,12 +7,19 @@ import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { registerTelegramGroup } from '../services/groupService';
 import { assertTelegramGroupMembership, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
-import { formatMinor, resolveWithdrawalMode, TEST_CURRENCY_WARNING } from '@red-envelope/shared';
+import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
+import { botTexts, normalizeLocale } from './texts';
 
 function telegramIdentity(ctx: { from?: { id: number; username?: string; first_name: string } }) {
   if (!ctx.from) throw new AppError(401, 'Telegram user is missing', 'TELEGRAM_USER_MISSING');
   return { telegramId: BigInt(ctx.from.id), username: ctx.from.username, firstName: ctx.from.first_name };
+}
+
+/** Preferred language of an existing user (flag selector in the Mini App). */
+async function userLocale(userId: string): Promise<'en' | 'zh'> {
+  const account = await prisma.user.findUnique({ where: { id: userId }, select: { locale: true } });
+  return normalizeLocale(account?.locale);
 }
 
 async function recordGroupActivity(ctx: {
@@ -42,43 +49,83 @@ export function createTelegramBot(): Bot {
   });
 
   bot.command('start', async (ctx) => {
-    await ensureWalletForTelegram(telegramIdentity(ctx));
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const locale = normalizeLocale(user.locale);
+    const texts = botTexts(locale);
+    // In a group, keep it short: just the launcher button. The full menu with
+    // balance buttons belongs in the private chat so balances are never posted
+    // publicly.
+    if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply(texts.startGroup, { reply_markup: miniAppKeyboard(texts.walletGroupButton) });
+      return;
+    }
     const keyboard = new InlineKeyboard()
       .text('💰 Balance', 'menu:balance').text('📜 History', 'menu:history').row()
       .text('↓ Deposit', 'menu:deposit').text('↑ Withdraw', 'menu:withdraw').row();
     if (isTelegramWebAppUrl(config.publicAppUrl)) {
-      keyboard.webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl).row();
+      keyboard.webApp(texts.walletButton, config.publicAppUrl).row();
     }
     keyboard.text('❓ Help', 'menu:help');
-    await ctx.reply(
-      `Welcome to Red Envelope Wallet 🧧\n\nYour account is secured by Telegram ID ${ctx.from?.id}. Your display name and @username are profile labels only and never identify financial ownership.\n\nTap "🧧 Open Red Envelope Wallet" or the 💳 button next to the message input to open your Mini App any time.`,
-      { reply_markup: keyboard }
-    );
+    await ctx.reply(texts.startWelcome(ctx.from?.id), { reply_markup: keyboard });
   });
 
   bot.command('help', async (ctx) => ctx.reply([
-    '/wallet — open the Mini App wallet (balance, history, withdrawals)',
+    '/wallet — open the Mini App wallet (balance, history, withdrawals); works inside groups too',
     '/balance — view your wallet',
     '/deposit — get the TRC20 deposit address',
     '/withdraw — open a withdrawal request',
     '/history — recent ledger activity',
+    '/lang en|zh — switch the bot language (English / 中文)',
     '/myid — show your Telegram ID (used to configure a treasury wallet)',
     '/registergroup — register this group in the app',
     '/redpacket <amount> <count> — fund and post a random red envelope in a group'
   ].join('\n')));
 
+  bot.command('lang', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const [, requested] = (ctx.msg?.text ?? '').trim().split(/\s+/);
+    if (requested !== 'en' && requested !== 'zh') {
+      await ctx.reply(`Current language: ${user.locale === 'zh' ? '中文 🇨🇳' : 'English 🇬🇧'}\n\nUse /lang en for English or /lang zh for 中文. The same choice is available with the flag selector inside the Mini App.`);
+      return;
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { locale: requested } });
+    const texts = botTexts(requested);
+    await ctx.reply(
+      requested === 'zh'
+        ? `✅ 语言已切换为中文 🇨🇳\n\n${texts.walletOpenApp}`
+        : `✅ Language switched to English 🇬🇧\n\n${texts.walletOpenApp}`,
+      { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+    );
+  });
+
   bot.command('wallet', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const wallet = await getWalletSummary(user.id);
-    const keyboard = miniAppKeyboard('🧧 Open Mini App');
-    const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${TEST_CURRENCY_WARNING}` : '';
+    const locale = normalizeLocale(user.locale);
+    const texts = botTexts(locale);
+    const keyboard = miniAppKeyboard(texts.walletDetailsButton);
+
+    // In a group, never post balance details publicly. The reply carries only
+    // the Mini App launcher; the details go to the user's private chat. This is
+    // how a member opens their wallet right after claiming an envelope.
+    if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply(texts.groupWalletPrompt, { reply_markup: keyboard });
+      try {
+        const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
+        await ctx.api.sendMessage(
+          user.telegramId.toString(),
+          [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
+          { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+        );
+      } catch (dmError) {
+        console.warn('[telegram-wallet-dm] could not message user (they may not have started the bot)', dmError);
+      }
+      return;
+    }
+
+    const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
     await ctx.reply(
-      [
-        `💳 Available: ${formatMinor(wallet.availableMinor)} USDT`,
-        `🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`,
-        '',
-        'Open the Mini App for your full history, deposits and withdrawals.'
-      ].join('\n') + testNote,
+      [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
       { reply_markup: keyboard }
     );
   });
@@ -125,53 +172,41 @@ export function createTelegramBot(): Bot {
   });
 
   bot.command('withdraw', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const texts = botTexts(normalizeLocale(user.locale));
     const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
     if (mode === 'disabled') {
-      await ctx.reply(
-        [
-          '⏸ Withdrawals are currently disabled.',
-          '',
-          `Why: this deployment runs in test mode (FUNDS_MODE=test) and no required test address is configured. Real TRC20 payouts need FUNDS_MODE=real with the Tron hot-wallet setup.`,
-          '',
-          'Until then your balance can be used for test red envelopes.'
-        ].join('\n')
-      );
+      await ctx.reply(texts.withdrawDisabled);
       return;
     }
-    const keyboard = miniAppKeyboard('🧧 Open Wallet');
+    const keyboard = miniAppKeyboard(texts.walletDetailsButton);
     if (mode === 'test') {
       await ctx.reply(
         [
-          '🧪 Test withdrawal',
+          texts.withdrawTest(config.withdrawal.testWithdrawalAddress ?? '', (config.withdrawal.minMinor / 1_000_000n).toString(), (config.withdrawal.feeMinor / 1_000_000n).toString()),
           '',
-          'Withdrawals are simulated in test mode — nothing is sent on the blockchain.',
-          `Required test TRC20 address: ${config.withdrawal.testWithdrawalAddress}`,
-          `Minimum: ${config.withdrawal.minMinor / 1_000_000n} USDT · Fee: ${config.withdrawal.feeMinor / 1_000_000n} USDT`,
-          '',
-          `⚠️ ${TEST_CURRENCY_WARNING}`
+          `⚠️ ${texts.testCurrencyWarning}`
         ].join('\n'),
         { reply_markup: keyboard }
       );
       return;
     }
-    await ctx.reply(
-      'Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.',
-      { reply_markup: keyboard }
-    );
+    await ctx.reply(texts.withdrawReal, { reply_markup: keyboard });
   });
 
   bot.command('history', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
-    const keyboard = miniAppKeyboard('🕘 Full history in Mini App');
+    const texts = botTexts(normalizeLocale(user.locale));
+    const keyboard = miniAppKeyboard(texts.historyButton);
     if (!ledger.length) {
-      await ctx.reply('No ledger activity yet. Open the Mini App to see deposits, claims and withdrawals once you start.', { reply_markup: keyboard });
+      await ctx.reply(texts.historyEmpty, { reply_markup: keyboard });
       return;
     }
     const lines = ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) =>
       `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`
     );
-    await ctx.reply([lines.join('\n'), '', 'Open the Mini App for your complete history and withdrawal status.'].join('\n'), { reply_markup: keyboard });
+    await ctx.reply([lines.join('\n'), '', texts.historyFooter].join('\n'), { reply_markup: keyboard });
   });
 
   bot.command('redpacket', async (ctx) => {
@@ -202,14 +237,16 @@ export function createTelegramBot(): Bot {
   bot.callbackQuery('menu:balance', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const wallet = await getWalletSummary(user.id);
+    const texts = botTexts(normalizeLocale(user.locale));
     await ctx.answerCallbackQuery();
-    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`);
+    await ctx.reply(texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)));
   });
   bot.callbackQuery('menu:history', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
+    const texts = botTexts(normalizeLocale(user.locale));
     await ctx.answerCallbackQuery();
-    await ctx.reply(ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : 'No ledger activity yet.');
+    await ctx.reply(ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : texts.historyEmpty);
   });
   bot.callbackQuery('menu:deposit', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
@@ -226,20 +263,22 @@ export function createTelegramBot(): Bot {
     await ctx.reply('Use Balance and History to inspect your internal USDT ledger. Open Wallet to create envelopes or request a withdrawal. Never share a seed phrase or private key—the bot will never ask for one.');
   });
   bot.callbackQuery('menu:withdraw', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const texts = botTexts(normalizeLocale(user.locale));
     await ctx.answerCallbackQuery();
     const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
     if (mode === 'disabled') {
-      await ctx.reply('⏸ Withdrawals are disabled in test mode and no TEST_WITHDRAWAL_ADDRESS is configured. Your balance can be used for test red envelopes.');
+      await ctx.reply(texts.withdrawDisabledShort);
       return;
     }
     if (mode === 'test') {
       await ctx.reply(
-        `🧪 Test withdrawals are simulated and must use the required test address ${config.withdrawal.testWithdrawalAddress}.\n\n⚠️ ${TEST_CURRENCY_WARNING}`,
-        { reply_markup: miniAppKeyboard('🧧 Open Wallet') }
+        `${texts.withdrawTestShort(config.withdrawal.testWithdrawalAddress ?? '')}\n\n⚠️ ${texts.testCurrencyWarning}`,
+        { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
       );
       return;
     }
-    await ctx.reply('Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.', { reply_markup: miniAppKeyboard('🧧 Open Wallet') });
+    await ctx.reply(texts.withdrawReal, { reply_markup: miniAppKeyboard(texts.walletDetailsButton) });
   });
 
   bot.callbackQuery(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i, async (ctx) => {
@@ -249,28 +288,31 @@ export function createTelegramBot(): Bot {
       const envelope = await getEnvelope(envelopeId);
       await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
       const result = await claimEnvelope(user.id, envelopeId);
+      const locale = await userLocale(user.id);
+      const texts = botTexts(locale);
       await ctx.answerCallbackQuery({
-        text: `You claimed ${formatMinor(result.claim.amountMinor)} USDT! New available balance: ${formatMinor(result.availableMinor)} USDT. I sent your wallet details to our chat.`,
+        text: texts.claimAlert(formatMinor(result.claim.amountMinor), formatMinor(result.availableMinor)),
         show_alert: true
       });
       // After a claim the user immediately wants their wallet details. Send
       // them privately (never in the group) with a button straight into the
-      // Mini App. Users who never started the bot cannot be messaged; the
-      // callback alert above still shows the balance in that case.
+      // Mini App, in the language picked with the Mini App flag selector.
+      // Users who never started the bot cannot be messaged; the callback
+      // alert above still shows the balance in that case.
       try {
         const wallet = await getWalletSummary(user.id);
-        const keyboard = miniAppKeyboard('🧧 Open My Wallet');
-        const currencyNote = config.fundsMode === 'test' ? `\n\n⚠️ ${TEST_CURRENCY_WARNING}` : '';
+        const keyboard = miniAppKeyboard(texts.walletDetailsButton);
+        const currencyNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
         await ctx.api.sendMessage(
           user.telegramId.toString(),
           [
-            '🧧 <b>Red envelope claimed</b>',
+            texts.claimDmHeader,
             '',
-            `Claimed: <b>+${formatMinor(result.claim.amountMinor)} USDT</b>`,
-            `Available: <b>${formatMinor(wallet.availableMinor)} USDT</b>`,
-            `Locked/pending withdrawal: <b>${formatMinor(wallet.lockedMinor)} USDT</b>`,
+            texts.claimDmClaimed(formatMinor(result.claim.amountMinor)),
+            texts.claimDmAvailable(formatMinor(wallet.availableMinor)),
+            texts.claimDmLocked(formatMinor(wallet.lockedMinor)),
             '',
-            'Open the Mini App for your full history, deposit address and withdrawals.'
+            texts.claimDmOpenApp
           ].join('\n') + currencyNote,
           { parse_mode: 'HTML', reply_markup: keyboard }
         );
@@ -282,7 +324,7 @@ export function createTelegramBot(): Bot {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
       } else {
         const keyboard = new InlineKeyboard().text(`🧧 Claim red envelope · ${latestEnvelope.remainingSlots} left`, latestEnvelope.id);
-        if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet', config.publicAppUrl);
+        if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp(texts.groupWalletButton, config.publicAppUrl);
         await ctx.editMessageReplyMarkup({ reply_markup: keyboard }).catch(() => undefined);
       }
     } catch (error) {

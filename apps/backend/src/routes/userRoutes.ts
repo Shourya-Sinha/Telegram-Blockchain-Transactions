@@ -31,6 +31,7 @@ userRouter.get('/me', async (req, res) => {
     username: user.username,
     firstName: user.firstName,
     isAdmin: user.isAdmin,
+    locale: user.locale === 'zh' ? 'zh' : 'en',
     wallet,
     fundsMode: config.fundsMode,
     depositsEnabled: config.fundsMode === 'real' && config.depositMode === 'unique' && Boolean(depositAddress),
@@ -49,6 +50,14 @@ userRouter.get('/me', async (req, res) => {
 
 userRouter.get('/wallet', async (req, res) => {
   res.json(jsonSafe(await getWalletSummary(req.telegramUser!.id)));
+});
+
+// Language preference from the Mini App flag selector (🇬🇧 en / 🇨🇳 zh). The
+// bot reads it to localize /wallet, the post-claim wallet message and alerts.
+userRouter.post('/locale', async (req, res) => {
+  const payload = z.object({ locale: z.enum(['en', 'zh']) }).parse(req.body);
+  await prisma.user.update({ where: { id: req.telegramUser!.id }, data: { locale: payload.locale } });
+  res.json({ locale: payload.locale });
 });
 
 userRouter.get('/ledger', async (req, res) => {

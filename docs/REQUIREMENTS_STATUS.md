@@ -27,6 +27,7 @@ The backend always upserts by `telegramId`, never by name or username. Mini App 
 - Admin roles, password authentication, actual TOTP verification when an MFA secret is configured, user inspection, transaction history, withdrawal/deposit views, group policy, audit logs, and emergency controls.
 - Group membership checks, per-user API rate limits, group message/account-age rules, daily group claim limit, user blocking, and claim concurrency protection.
 - Mini App wallet, create-envelope form, claim animation/result, withdrawal form, ledger activity, Telegram back button, compact Telegram viewport, and safe-area handling.
+- English 🇬🇧 / Chinese 🇨🇳 flag selectors in both the Mini App and the admin console (`en`/`zh` codes); the Mini App choice is persisted per user (`User.locale`, migration `0004_user_locale`) and the bot localizes `/wallet`, `/balance`, `/history`, `/withdraw`, and the post-claim wallet message accordingly (`/lang en|zh` also works from chat). Group-visible buttons are bilingual.
 - Independent repeatable expiry worker, deposit worker, withdrawal worker, audit events, and Docker deployment files.
 
 ## Partial requirements

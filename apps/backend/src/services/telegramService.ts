@@ -47,9 +47,10 @@ type PublishableEnvelope = {
 export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Promise<number> {
   // The claim button stays first; the wallet button underneath is how a group
   // member reaches the Mini App and sees their balance/history right where
-  // they claimed, without hunting for the bot menu.
-  const keyboard = new InlineKeyboard().text('🧧 Claim red envelope', envelope.id);
-  if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet', config.publicAppUrl);
+  // they claimed, without hunting for the bot menu. It is bilingual because a
+  // group message is the same for every viewer.
+  const keyboard = new InlineKeyboard().text('🧧 Claim red envelope · 领取红包', envelope.id);
+  if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet · 打开钱包', config.publicAppUrl);
   const mode = envelope.mode === 'EQUAL' ? 'equal shares' : 'random shares';
   const message = await getTelegramBot().api.sendMessage(
     envelope.groupId.toString(),

@@ -1,39 +1,43 @@
-# User guide — opening the Mini App, history, withdrawals, and test mode
+# User guide — opening the Mini App, language flags, history, withdrawals, and test mode
 
-This guide answers the four most common user questions:
+This guide answers the five most common user questions:
 
-1. How does a user open their Telegram Mini App (their wallet)?
+1. How does a user open their Telegram Mini App (their wallet) — including **from a group, right after claiming**?
 2. How do they see their history and withdrawals?
 3. Why is the Withdraw button disabled?
 4. How do test withdrawals work with the required test TRON (tether) address?
+5. How do the English 🇬🇧 / Chinese 🇨🇳 language flags work?
 
 ## 1. How a user opens their Mini App
 
-There are now **five ways in**, so a user never has to hunt for the wallet:
+There are now **six ways in**, so a user never has to hunt for the wallet:
 
 | Entry point | Where the user sees it |
 |---|---|
 | **Chat menu button** — the bot registers a persistent `🧧 Wallet` button | Left of the message-input `📎` button in every chat with the bot. Set automatically at backend startup (needs `PUBLIC_APP_URL` to be HTTPS, or `localhost` while developing). |
-| **`/start`** | Replies with the `🧧 Open Red Envelope Wallet` button. |
-| **`/wallet`** (new command) | Replies with balance, locked amount and an `🧧 Open Mini App` button. |
-| **The red envelope message itself** | Every envelope posted in a group now carries a second button — `💰 Open My Wallet` — directly under `🧧 Claim red envelope`. |
+| **`/start`** | Replies with the `🧧 Open Red Envelope Wallet` button (private chat). In a group it replies with just the launcher button — no balance is posted publicly. |
+| **`/wallet`** | Replies with balance, locked amount and an `🧧 Open My Wallet` button. **Works inside groups too** (see below). |
+| **The red envelope message itself** | Every envelope posted in a group now carries a second button — `💰 Open My Wallet · 打开钱包` — directly under `🧧 Claim red envelope · 领取红包`. |
 | **The private message after every claim** | Right after claiming, the bot sends the user a private message with their claimed amount, available balance, locked balance, and an `🧧 Open My Wallet` button. |
+| **`/lang`, `/balance`, `/history`…** | Every bot reply that shows wallet information also carries a Mini App launcher button. |
 
-The bot also registers its full command list (`/start`, `/wallet`, `/balance`, `/history`, `/deposit`, `/withdraw`, `/redpacket`, `/registergroup`, `/myid`, `/help`) with Telegram, so all commands autocomplete when the user types `/`.
+The bot also registers its full command list (`/start`, `/wallet`, `/balance`, `/history`, `/deposit`, `/withdraw`, `/lang`, `/redpacket`, `/registergroup`, `/myid`, `/help`) with Telegram, so all commands autocomplete when the user types `/`.
 
-### After a claim in a group — seeing wallet details
+### After a claim in a group — seeing wallet details and launching the Mini App
 
-When a group is registered (`/registergroup`) and a member taps **Claim red envelope**:
+When a group is registered (`/registergroup`) and a member taps **Claim red envelope · 领取红包**:
 
-1. A Telegram alert immediately shows the claimed amount and the new available balance.
-2. The bot sends a **private message** (never posted in the group) with:
+1. The envelope message **in the group itself** carries the `💰 Open My Wallet · 打开钱包` button — one tap opens the Mini App with balance, history and withdrawals. No command needed.
+2. A Telegram alert immediately shows the claimed amount and the new available balance.
+3. The bot sends a **private message** (never posted in the group) with:
    - Claimed amount (`+X USDT`)
    - Available balance
    - Locked/pending-withdrawal balance
    - A `🧧 Open My Wallet` button into the Mini App
-3. In test mode the message also carries the warning: *This is test currency only — no real USDT is sent or received.*
+4. **`/wallet` typed in the group** is the dedicated launcher command: the bot replies publicly with just the Mini App button and sends the wallet details privately. `/start` in a group behaves the same way.
+5. In test mode the private message also carries the warning: *This is test currency only — no real USDT is sent or received.* (此为测试币)
 
-> If the user never pressed Start on the bot, Telegram forbids the private message; the claim alert still shows their balance, and the `💰 Open My Wallet` button on the envelope message still works.
+> If the user never pressed Start on the bot, Telegram forbids the private message; the claim alert still shows their balance, and the `💰 Open My Wallet · 打开钱包` button on the envelope message still works.
 
 ## 2. How a user sees their history and withdrawals
 
@@ -91,11 +95,35 @@ Safety rules enforced by the backend:
 - Setting `TEST_WITHDRAWAL_ADDRESS` while `FUNDS_MODE=real` is a startup error — simulated payouts and real payouts can never coexist.
 - The minimum (`WITHDRAWAL_MIN_USDT`), fee (`WITHDRAWAL_FEE_USDT`), idempotency-key and emergency-disable rules all apply to test withdrawals exactly as they do to real ones.
 
+## 5. Language flags — English 🇬🇧 and Chinese 🇨🇳
+
+Both the **Telegram Mini App** and the **admin console** have a flag selector with language codes `EN` and `ZH`. Tapping a flag instantly switches the entire interface; the choice is remembered on the device.
+
+**Mini App:**
+
+- The selector sits in the top bar of every tab (Wallet, DeFi, Yield, Apps): two chips — 🇬🇧 `EN` and 🇨🇳 `ZH`.
+- First visit picks the language automatically from the Telegram client's own language (`language_code` starting with `zh` → Chinese, otherwise English).
+- Switching a flag also **syncs the choice to the backend** (`POST /api/locale`, stored on the user record). The bot then uses it, so the post-claim wallet message, `/wallet`, `/balance`, `/history` and `/withdraw` replies all arrive in the chosen language.
+- Group-visible buttons (like the wallet button under a red envelope) are bilingual — `💰 Open My Wallet · 打开钱包` — because one group message is seen by everyone.
+- `/lang en` or `/lang zh` sets the same preference from the bot chat; `/lang` alone shows the current language.
+
+**Admin console:**
+
+- The selector is on the login screen, in the sidebar (desktop), and in the mobile top bar.
+- Everything is translated: navigation, dashboard KPIs, envelope sending form, deposit/withdrawal tables with status labels, user management, group policy, and audit logs.
+- The admin language is an operator preference stored per browser (`admin-lang`); it does not affect what users see.
+
+**Backend:**
+
+- `User.locale` (`en` default, `zh` optional) persists the Mini App choice — see migration `0004_user_locale`.
+- Bot message dictionaries live in `apps/backend/src/bot/texts.ts`; a test keeps the English and Chinese key sets in sync so a missing translation can never ship.
+
 ## Quick reference — what changed for each ask
 
 | Ask | Where it lives now |
 |---|---|
 | See the Mini App | Chat menu button, `/start`, `/wallet`, wallet button on envelope messages, post-claim private message |
+| Open the Mini App from a group after claiming | Wallet button on the envelope message, post-claim DM, and `/wallet`/`/start` inside the group (public launcher + private details) |
 | See history | Wallet tab → History / See all → full panel (ledger + withdrawals) |
 | See withdrawals + status | History panel → Withdrawals section with status chips |
 | Why withdrawal disabled | Explained in-app on the disabled button tooltip, in the banner, by `/withdraw`, and in the `403 TEST_MODE` API error |

@@ -19,6 +19,7 @@ export interface MeResponse {
   depositsEnabled: boolean;
   withdrawalsEnabled: boolean;
   withdrawalMode: WithdrawalMode;
+  locale: 'en' | 'zh';
   withdrawalMinMinor?: string;
   withdrawalFeeMinor?: string;
   testWithdrawalAddress?: string;
