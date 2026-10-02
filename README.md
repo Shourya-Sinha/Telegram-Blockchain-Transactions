@@ -94,6 +94,14 @@ Set the TRC20 network values in `.env`:
 
 `HOT_WALLET_PRIVATE_KEY` is intentionally read only from the environment. In production replace the signing path with AWS KMS or HashiCorp Vault; do not put a private key in source control, Docker images, logs, or ordinary database fields.
 
+## Troubleshooting
+
+**The backend used to exit with `AppError: Insufficient available balance` after sending an envelope.**
+Two separate things were going on:
+
+1. *The error itself is correct behaviour:* admin-sent envelopes are paid from the treasury wallet (`RED_ENVELOPE_TREASURY_TELEGRAM_ID`), and that wallet held less than the envelope total. Fund it and try again — in test mode either from the admin console (**Users → treasury account → Add test USDT**, requires `ALLOW_DEV_CREDIT=true`) or with `npm run db:dev-credit -- <treasury-telegram-id> <amount-usdt>`. The treasury account must have run `/start` once so its wallet exists. The **Send envelope** page shows the current treasury balance next to the form.
+2. *The crash was a bug, and is fixed:* Express 4 does not forward rejections from `async` route handlers to the error middleware, so the rejection became an unhandled promise rejection — which Node terminates the process for by default. Every async route handler is now wrapped with `asyncHandler` (`src/utils/asyncHandler.ts`), so business errors return a clean 4xx JSON response (the admin console shows a localized toast; the Mini App shows it in the form). A `process.on('unhandledRejection')` safety net in `server.ts` logs anything that still slips through instead of letting it kill the bot/API/workers, and a static test fails the build if a route is ever registered unwrapped again.
+
 The `User.depositAddress` field is the safe mapping point for a production deposit-address allocator. In `FUNDS_MODE=real` with `DEPOSIT_MODE=unique`, the deposit worker scans each provisioned address, records transaction hash, token contract, source, destination, amount and actual confirmation count, and credits the ledger only after the configured depth. `/api/deposit/address` returns only that user's assigned address; it fails closed when an address is unavailable and never substitutes the shared hot-wallet address. Address/key provisioning and sweeping must be integrated with reviewed custody or KMS/HSM infrastructure before accepting funds.
 
 Withdrawals reserve the requested amount and fee in the ledger before queueing. Amounts below `WITHDRAWAL_AUTO_APPROVAL_LIMIT` are queued automatically; larger requests remain queued until a finance/super admin approves them. A failed request is never silently re-credited: the original debit remains the auditable liability settlement and finance can retry only after checking the chain.

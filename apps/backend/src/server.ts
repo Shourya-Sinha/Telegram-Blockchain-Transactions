@@ -150,6 +150,21 @@ if (config.nodeEnv !== 'test') {
     server.close(() => process.exit(0));
   };
 
+  // Safety net: a rejected promise that escaped a route handler must never
+  // terminate the bot/API/workers process (Node's default since v15 — that is
+  // how an "insufficient balance" business error used to crash the backend).
+  // Handlers are wrapped with asyncHandler; anything still slipping through is
+  // logged loudly here instead of killing the process.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[unhandled-rejection] caught by safety net — process stays alive:', reason);
+  });
+  // A synchronous exception outside Express leaves the process in an unknown
+  // state; log it and exit through the graceful path instead of dying mid-write.
+  process.on('uncaughtException', (error) => {
+    console.error('[uncaught-exception] shutting down gracefully:', error);
+    shutdown();
+  });
+
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
 }

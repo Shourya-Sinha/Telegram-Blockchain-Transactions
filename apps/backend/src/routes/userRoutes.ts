@@ -12,11 +12,12 @@ import { config } from '../config';
 import { prisma } from '../lib/prisma';
 import { jsonSafe, resolveWithdrawalMode, TEST_CURRENCY_WARNING } from '@red-envelope/shared';
 import { grantAutomaticTestCredit } from '../services/devCreditService';
+import { asyncHandler } from '../utils/asyncHandler';
 
 export const userRouter = Router();
 userRouter.use(telegramAuth);
 
-userRouter.get('/me', async (req, res) => {
+userRouter.get('/me', asyncHandler(async (req, res) => {
   const user = req.telegramUser!;
   await grantAutomaticTestCredit(user.id);
   const [wallet, account] = await Promise.all([
@@ -46,27 +47,27 @@ userRouter.get('/me', async (req, res) => {
     testCurrencyWarning: withdrawalMode === 'test' ? TEST_CURRENCY_WARNING : undefined,
     depositAddress: config.fundsMode === 'real' && config.depositMode === 'unique' ? depositAddress : undefined
   }));
-});
+}));
 
-userRouter.get('/wallet', async (req, res) => {
+userRouter.get('/wallet', asyncHandler(async (req, res) => {
   res.json(jsonSafe(await getWalletSummary(req.telegramUser!.id)));
-});
+}));
 
 // Language preference from the Mini App flag selector (🇬🇧 en / 🇨🇳 zh). The
 // bot reads it to localize /wallet, the post-claim wallet message and alerts.
-userRouter.post('/locale', async (req, res) => {
+userRouter.post('/locale', asyncHandler(async (req, res) => {
   const payload = z.object({ locale: z.enum(['en', 'zh']) }).parse(req.body);
   await prisma.user.update({ where: { id: req.telegramUser!.id }, data: { locale: payload.locale } });
   res.json({ locale: payload.locale });
-});
+}));
 
-userRouter.get('/ledger', async (req, res) => {
+userRouter.get('/ledger', asyncHandler(async (req, res) => {
   const limit = Number(req.query.limit ?? 50);
   res.json(jsonSafe(await getLedger(req.telegramUser!.id, Number.isFinite(limit) ? limit : 50)));
-});
-userRouter.get('/history', async (req, res) => res.json(jsonSafe(await getLedger(req.telegramUser!.id, 50))));
+}));
+userRouter.get('/history', asyncHandler(async (req, res) => res.json(jsonSafe(await getLedger(req.telegramUser!.id, 50)))));
 
-userRouter.get('/deposit/address', async (req, res) => {
+userRouter.get('/deposit/address', asyncHandler(async (req, res) => {
   if (config.fundsMode !== 'real') {
     res.status(403).json({ error: 'Blockchain deposits are disabled in test mode. Ask an admin to add test USDT.', code: 'TEST_MODE' });
     return;
@@ -77,18 +78,18 @@ userRouter.get('/deposit/address', async (req, res) => {
     return;
   }
   res.json({ address: user.depositAddress, chain: 'TRC20', confirmations: config.tron.confirmations });
-});
+}));
 
-userRouter.get('/groups', async (req, res) => {
+userRouter.get('/groups', asyncHandler(async (req, res) => {
   const groups = await listRegisteredGroups();
   const memberGroups = [];
   for (const group of groups) {
     if (group.enabled && await isTelegramGroupMember(group.chatId, req.telegramUser!.telegramId)) memberGroups.push(group);
   }
   res.json(jsonSafe(memberGroups));
-});
+}));
 
-userRouter.post('/envelopes', rateLimit('envelope-create'), async (req, res) => {
+userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (req, res) => {
   const payload = z.object({
     total: z.string().regex(/^\d+(\.\d{1,6})?$/),
     count: z.number().int().min(1).max(500),
@@ -99,36 +100,36 @@ userRouter.post('/envelopes', rateLimit('envelope-create'), async (req, res) => 
   await assertTelegramGroupMembership(BigInt(payload.groupId), req.telegramUser!.telegramId);
   const envelope = await createAndPublishEnvelope(req.telegramUser!.id, { ...payload, ipAddress: req.ip });
   res.status(201).json(jsonSafe(envelope));
-});
+}));
 
-userRouter.get('/envelopes/:id', async (req, res) => {
+userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
   await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
   res.json(jsonSafe(envelope));
-});
-userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), async (req, res) => {
+}));
+userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
   await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
   const result = await claimEnvelope(req.telegramUser!.id, envelope.id, req.ip);
   res.json(jsonSafe(result));
-});
+}));
 
-userRouter.get('/deposits', async (req, res) => {
+userRouter.get('/deposits', asyncHandler(async (req, res) => {
   const deposits = await prisma.deposit.findMany({ where: { userId: req.telegramUser!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
   res.json(jsonSafe(deposits));
-});
+}));
 
-userRouter.post('/withdrawals', rateLimit('withdrawal-create'), async (req, res) => {
+userRouter.post('/withdrawals', rateLimit('withdrawal-create'), asyncHandler(async (req, res) => {
   const payload = z.object({ amount: z.string(), toAddress: z.string(), idempotencyKey: z.string().uuid().optional() }).parse(req.body);
   const withdrawal = await createWithdrawal(req.telegramUser!.id, { ...payload, ipAddress: req.ip });
   res.status(201).json(jsonSafe(withdrawal));
-});
-userRouter.get('/withdrawals', async (req, res) => {
+}));
+userRouter.get('/withdrawals', asyncHandler(async (req, res) => {
   const withdrawals = await prisma.withdrawal.findMany({ where: { userId: req.telegramUser!.id }, orderBy: { createdAt: 'desc' }, take: 50 });
   res.json(jsonSafe(withdrawals));
-});
-userRouter.get('/withdrawals/:id', async (req, res) => {
+}));
+userRouter.get('/withdrawals/:id', asyncHandler(async (req, res) => {
   const withdrawal = await prisma.withdrawal.findFirst({ where: { id: String(req.params.id), userId: req.telegramUser!.id } });
   if (!withdrawal) { res.status(404).json({ error: 'Withdrawal not found', code: 'WITHDRAWAL_NOT_FOUND' }); return; }
   res.json(jsonSafe(withdrawal));
-});
+}));

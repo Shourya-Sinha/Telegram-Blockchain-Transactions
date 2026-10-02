@@ -48,6 +48,7 @@ function EnvelopesPage() {
   const [mode, setMode] = useState<'RANDOM' | 'EQUAL'>('RANDOM');
   const [expiresInMinutes, setExpiresInMinutes] = useState(1440);
   const [message, setMessage] = useState('');
+  const [messageTone, setMessageTone] = useState<'success' | 'danger'>('danger');
   const send = useMutation({
     mutationFn: () => adminApi<{ envelope: { id: string } }>('/api/admin/envelopes/send', {
       method: 'POST',
@@ -55,9 +56,17 @@ function EnvelopesPage() {
     }),
     onSuccess: (result) => {
       setMessage(t('envelopePosted', result.envelope.id.slice(0, 8)));
+      setMessageTone('success');
       void client.invalidateQueries({ queryKey: ['envelope-setup'] });
     },
-    onError: (error) => setMessage(error instanceof Error ? error.message : t('unableToSendEnvelope'))
+    onError: (error) => {
+      const detail = error instanceof Error ? error.message : t('unableToSendEnvelope');
+      const code = (error as { code?: string }).code;
+      // Friendly, localized toast for the most common failure; the backend
+      // detail (needs X / has Y USDT) is appended for the operator.
+      setMessage(code === 'TREASURY_INSUFFICIENT_BALANCE' ? `${t('treasuryInsufficient')} ${detail}` : detail);
+      setMessageTone('danger');
+    }
   });
   const groups = setup.data?.groups.filter((group) => group.enabled) ?? [];
   const groupName = (id: string) => setup.data?.groups.find((group) => group.chatId === id)?.title ?? id;
@@ -72,7 +81,7 @@ function EnvelopesPage() {
         <div className="settings-grid"><label>{t('totalUsdt')}<input value={total} inputMode="decimal" onChange={(event) => setTotal(event.target.value)} /></label><label>{t('numberOfClaims')}<input type="number" min="1" max="500" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label><label>{t('distribution')}<select value={mode} onChange={(event) => setMode(event.target.value as 'RANDOM' | 'EQUAL')}><option value="RANDOM">{t('randomShares')}</option><option value="EQUAL">{t('equalShares')}</option></select></label></div>
         <label>{t('expires')}<select value={expiresInMinutes} onChange={(event) => setExpiresInMinutes(Number(event.target.value))}><option value={60}>{t('inOneHour')}</option><option value={1440}>{t('in24Hours')}</option><option value={10080}>{t('in7Days')}</option></select></label>
         <div className="treasury-line"><span>{t('treasuryWallet')}</span><strong>{setup.data?.treasury ? t('usdtAvailable', money(setup.data.treasury.wallet?.availableMinor)) : setup.data?.treasuryTelegramIdConfigured ? t('idConfigured') : t('telegramIdNotConfigured')}</strong></div>
-        {message && <div className={message === t('envelopePosted', message.match(/#([0-9a-f]{8})/)?.[1] ?? '') ? 'alert success' : 'alert danger'}>{message}</div>}
+        {message && <div className={`alert ${messageTone}`}>{message}</div>}
         <button className="login-button save-button" disabled={!setup.data?.configured || !groupId || send.isPending} onClick={() => { setMessage(''); send.mutate(); }}>{send.isPending ? t('fundingPosting') : t('sendToGroup')}</button>
       </section>
       <div className="info-callout envelope-help"><strong>{t('whatMembersSee')}</strong><p>{t('whatMembersSeeText')}</p></div>
