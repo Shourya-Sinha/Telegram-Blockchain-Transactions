@@ -77,11 +77,11 @@ The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend
 2. Set a long random `TELEGRAM_WEBHOOK_SECRET`.
 3. Expose the backend over HTTPS and set `TELEGRAM_WEBHOOK_URL=https://your-domain/telegram/webhook`.
 4. The backend registers a public HTTPS webhook on startup and checks `X-Telegram-Bot-Api-Secret-Token` on every webhook request. For local development (`localhost`, `127.0.0.1`, or a missing webhook URL), it automatically removes the unreachable webhook and uses Telegram long polling instead.
-5. Configure the bot menu or `/start` to open the Mini App URL (`PUBLIC_APP_URL`).
+5. Configure the bot menu or `/start` to open the Mini App URL (`PUBLIC_APP_URL`). On startup the backend also registers a persistent `🧧 Wallet` chat-menu button and the full bot command list automatically (the URL must be HTTPS, or `localhost` during development).
 6. Add the bot to each destination group, promote it so it can send/edit messages and verify membership, then run `/registergroup` in that group.
 7. Run `/myid` from the funded treasury Telegram account and set that number as `RED_ENVELOPE_TREASURY_TELEGRAM_ID` to enable admin-created envelopes.
 
-The bot supports `/start`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Its claim callback data is only the UUID envelope ID. See the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow and the [requirements status](docs/REQUIREMENTS_STATUS.md) for an honest implemented/partial/production-gate matrix.
+The bot supports `/start`, `/wallet`, `/myid`, `/registergroup`, `/balance`, `/deposit`, `/withdraw`, `/history`, `/help`, and `/redpacket <amount> <count>`. Every envelope message carries a `💰 Open My Wallet` button, and each successful claim triggers a private message with the claimer's wallet details and a Mini App button. See the [user guide](docs/USER_GUIDE.md) for the complete user-facing flow, the [red-envelope guide](docs/RED_ENVELOPE_GUIDE.md) for the exact end-to-end flow, and the [requirements status](docs/REQUIREMENTS_STATUS.md) for an honest implemented/partial/production-gate matrix.
 
 ## Tron / deposits / withdrawals
 
@@ -97,6 +97,15 @@ Set the TRC20 network values in `.env`:
 The `User.depositAddress` field is the safe mapping point for a production deposit-address allocator. In `FUNDS_MODE=real` with `DEPOSIT_MODE=unique`, the deposit worker scans each provisioned address, records transaction hash, token contract, source, destination, amount and actual confirmation count, and credits the ledger only after the configured depth. `/api/deposit/address` returns only that user's assigned address; it fails closed when an address is unavailable and never substitutes the shared hot-wallet address. Address/key provisioning and sweeping must be integrated with reviewed custody or KMS/HSM infrastructure before accepting funds.
 
 Withdrawals reserve the requested amount and fee in the ledger before queueing. Amounts below `WITHDRAWAL_AUTO_APPROVAL_LIMIT` are queued automatically; larger requests remain queued until a finance/super admin approves them. A failed request is never silently re-credited: the original debit remains the auditable liability settlement and finance can retry only after checking the chain.
+
+### Simulated test withdrawals (why the button can be disabled)
+
+In `FUNDS_MODE=test` the withdrawal button is disabled unless you set `TEST_WITHDRAWAL_ADDRESS` — a single required test TRC20 address. When set:
+
+- Withdrawals are **simulated**: amount + fee are reserved and settled in one transaction, the record is marked `COMPLETED` with a `WITHDRAWAL_TEST_COMPLETED` audit entry, and **no TRC20 transaction is ever broadcast**.
+- The Mini App locks the destination field to that address and the API rejects any other address with `403 TEST_WITHDRAWAL_ADDRESS_REQUIRED`.
+- Every surface (Mini App banner, withdraw form, `/withdraw` bot reply, post-claim message) repeats the warning: *This is test currency only — no real USDT is sent or received.*
+- Setting `TEST_WITHDRAWAL_ADDRESS` while `FUNDS_MODE=real` is a startup error.
 
 ## Production Docker deployment
 
@@ -125,7 +134,7 @@ Withdrawals reserve the requested amount and fee in the ledger before queueing. 
 
 TMA routes use `X-Telegram-Init-Data`:
 
-- `GET /api/me`, `/api/wallet`, `/api/ledger`, `/api/deposit/address`, `/api/deposits`
+- `GET /api/me` (includes `fundsMode`, `withdrawalMode` — `real` / `test` / `disabled` — plus `withdrawalMinMinor`, `withdrawalFeeMinor`, `testWithdrawalAddress` and `testCurrencyWarning` in test mode), `/api/wallet`, `/api/ledger`, `/api/deposit/address`, `/api/deposits`
 - `POST /api/envelopes`, `GET /api/envelopes/:id`, `POST /api/envelopes/:id/claim`
 - `POST /api/withdrawals`, `GET /api/withdrawals`, `GET /api/withdrawals/:id`
 

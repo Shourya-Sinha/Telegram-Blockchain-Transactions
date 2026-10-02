@@ -8,6 +8,7 @@ import { userRouter } from './routes/userRoutes';
 import { adminRouter } from './routes/adminRoutes';
 import { createTelegramBot } from './bot/bot';
 import { startWorkers } from './jobs/workers';
+import { isTelegramWebAppUrl } from './services/telegramService';
 import { AppError } from './utils/errors';
 
 assertProductionConfig();
@@ -94,6 +95,36 @@ if (config.nodeEnv !== 'test') {
     try {
       await bot.init();
       console.log('[telegram] bot initialized');
+
+      // Make the Mini App discoverable: a persistent "Wallet" button in the
+      // bot chat menu (next to the message input) plus the command list shown
+      // when typing "/". This is the primary way users open their wallet.
+      try {
+        if (isTelegramWebAppUrl(config.publicAppUrl)) {
+          await bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: '🧧 Wallet', web_app: { url: config.publicAppUrl } } });
+          console.log('[telegram] mini app menu button configured');
+        } else {
+          console.warn('[telegram] PUBLIC_APP_URL is not an HTTPS/localhost URL; skipping mini app menu button');
+        }
+      } catch (menuError) {
+        console.error('[telegram] menu button setup failed', menuError);
+      }
+      try {
+        await bot.api.setMyCommands([
+          { command: 'start', description: 'Open the start menu and your wallet' },
+          { command: 'wallet', description: 'Open the Mini App wallet' },
+          { command: 'balance', description: 'View available and locked balance' },
+          { command: 'history', description: 'Recent ledger activity' },
+          { command: 'deposit', description: 'Get the TRC20 deposit address' },
+          { command: 'withdraw', description: 'Submit a withdrawal request' },
+          { command: 'redpacket', description: 'Send a red envelope in a group' },
+          { command: 'registergroup', description: 'Register this group for envelopes' },
+          { command: 'myid', description: 'Show your Telegram ID' },
+          { command: 'help', description: 'List all commands' }
+        ]);
+      } catch (commandsError) {
+        console.error('[telegram] command registration failed', commandsError);
+      }
 
       if (isPublicTelegramWebhook(config.telegramWebhookUrl)) {
         await bot.api.setWebhook(config.telegramWebhookUrl, {

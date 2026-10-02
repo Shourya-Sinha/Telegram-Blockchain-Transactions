@@ -10,7 +10,7 @@ import { telegramAuth } from '../middleware/auth';
 import { rateLimit } from '../middleware/rateLimit';
 import { config } from '../config';
 import { prisma } from '../lib/prisma';
-import { jsonSafe } from '@red-envelope/shared';
+import { jsonSafe, resolveWithdrawalMode, TEST_CURRENCY_WARNING } from '@red-envelope/shared';
 import { grantAutomaticTestCredit } from '../services/devCreditService';
 
 export const userRouter = Router();
@@ -24,6 +24,7 @@ userRouter.get('/me', async (req, res) => {
     prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } })
   ]);
   const depositAddress = account?.depositAddress;
+  const withdrawalMode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
   res.json(jsonSafe({
     id: user.id,
     telegramId: user.telegramId,
@@ -33,7 +34,15 @@ userRouter.get('/me', async (req, res) => {
     wallet,
     fundsMode: config.fundsMode,
     depositsEnabled: config.fundsMode === 'real' && config.depositMode === 'unique' && Boolean(depositAddress),
-    withdrawalsEnabled: config.chainOperationsEnabled,
+    // Why withdrawals can be disabled: FUNDS_MODE=test without a configured
+    // TEST_WITHDRAWAL_ADDRESS. In 'test' mode withdrawals are simulated to the
+    // required test address only; in 'real' mode they broadcast on TRC20.
+    withdrawalsEnabled: withdrawalMode !== 'disabled',
+    withdrawalMode,
+    withdrawalMinMinor: config.withdrawal.minMinor,
+    withdrawalFeeMinor: config.withdrawal.feeMinor,
+    testWithdrawalAddress: withdrawalMode === 'test' ? config.withdrawal.testWithdrawalAddress : undefined,
+    testCurrencyWarning: withdrawalMode === 'test' ? TEST_CURRENCY_WARNING : undefined,
     depositAddress: config.fundsMode === 'real' && config.depositMode === 'unique' ? depositAddress : undefined
   }));
 });

@@ -37,3 +37,18 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 
 .field-label select { width: 100%; padding: 12px 13px; border: 1px solid #293c54; border-radius: 11px; outline: none; color: #f3f7fc; background: #0a1625; font-size: 13px; }
 .field-label select:focus { border-color: #5da7de; box-shadow: 0 0 0 3px rgba(72, 153, 214, .1); }
+
+/* Full history panel (withdrawals + ledger), opened from the Wallet tab. */
+.history-panel { position: relative; z-index: 1; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: calc(14px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))) calc(19px + max(var(--app-safe-right), env(safe-area-inset-right, 0px))) 26px calc(19px + max(var(--app-safe-left), env(safe-area-inset-left, 0px))); animation: appear .35s ease; }
+.history-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.history-header h2 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
+.history-warning { margin: 0 0 6px; }
+.history-count { color: #6d7f96; font-size: 11px; }
+.withdrawal-row { display: flex; align-items: center; width: 100%; padding: 13px 14px; }
+.withdrawal-row + .withdrawal-row, .withdrawal-row + .activity-row, .activity-row + .withdrawal-row { border-top: 1px solid #172638; }
+.activity-icon.withdraw { color: #9bc7f5; background: rgba(90, 156, 227, .15); }
+.withdrawal-address { overflow: hidden; max-width: 150px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.status-chip { flex: 0 0 auto; margin-left: auto; padding: 5px 8px; border-radius: 8px; color: #78bcf1; background: rgba(75, 156, 224, .13); font-size: 9px; font-weight: 750; letter-spacing: .05em; text-align: right; }
+.status-completed { color: #6fe0ac; background: rgba(54, 190, 131, .13); }
+.status-failed, .status-rejected { color: #ffaaa8; background: rgba(231, 94, 94, .12); }
+.status-processing, .status-broadcast, .status-confirming, .status-queued { color: #eecf85; background: rgba(224, 173, 75, .12); }

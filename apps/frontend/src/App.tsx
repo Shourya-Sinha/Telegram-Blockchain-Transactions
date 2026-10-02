@@ -10,7 +10,7 @@ import { DeFiScreen } from './screens/DeFiScreen';
 import { YieldScreen } from './screens/YieldScreen';
 import { AppsScreen } from './screens/AppsScreen';
 
-const demoMe: MeResponse = { id: 'demo', telegramId: '0', firstName: 'friend', isAdmin: false, fundsMode: 'test', depositsEnabled: false, withdrawalsEnabled: false, wallet: { id: 'demo-wallet', availableMinor: '0', lockedMinor: '0', version: 0 }, depositAddress: '' };
+const demoMe: MeResponse = { id: 'demo', telegramId: '0', firstName: 'friend', isAdmin: false, fundsMode: 'test', depositsEnabled: false, withdrawalsEnabled: false, withdrawalMode: 'disabled', wallet: { id: 'demo-wallet', availableMinor: '0', lockedMinor: '0', version: 0 }, depositAddress: '' };
 export default function App() {
   const activeTab = useWalletStore((state) => state.activeTab);
   const setMe = useWalletStore((state) => state.setMe);

@@ -6,8 +6,8 @@ import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../service
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { registerTelegramGroup } from '../services/groupService';
-import { assertTelegramGroupMembership, registerTelegramBot } from '../services/telegramService';
-import { formatMinor } from '@red-envelope/shared';
+import { assertTelegramGroupMembership, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
+import { formatMinor, resolveWithdrawalMode, TEST_CURRENCY_WARNING } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
 
 function telegramIdentity(ctx: { from?: { id: number; username?: string; first_name: string } }) {
@@ -45,15 +45,19 @@ export function createTelegramBot(): Bot {
     await ensureWalletForTelegram(telegramIdentity(ctx));
     const keyboard = new InlineKeyboard()
       .text('💰 Balance', 'menu:balance').text('📜 History', 'menu:history').row()
-      .text('↓ Deposit', 'menu:deposit').webApp('↑ Withdraw', config.publicAppUrl).row()
-      .webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl).text('❓ Help', 'menu:help');
+      .text('↓ Deposit', 'menu:deposit').text('↑ Withdraw', 'menu:withdraw').row();
+    if (isTelegramWebAppUrl(config.publicAppUrl)) {
+      keyboard.webApp('🧧 Open Red Envelope Wallet', config.publicAppUrl).row();
+    }
+    keyboard.text('❓ Help', 'menu:help');
     await ctx.reply(
-      `Welcome to Red Envelope Wallet 🧧\n\nYour account is secured by Telegram ID ${ctx.from?.id}. Your display name and @username are profile labels only and never identify financial ownership.`,
+      `Welcome to Red Envelope Wallet 🧧\n\nYour account is secured by Telegram ID ${ctx.from?.id}. Your display name and @username are profile labels only and never identify financial ownership.\n\nTap "🧧 Open Red Envelope Wallet" or the 💳 button next to the message input to open your Mini App any time.`,
       { reply_markup: keyboard }
     );
   });
 
   bot.command('help', async (ctx) => ctx.reply([
+    '/wallet — open the Mini App wallet (balance, history, withdrawals)',
     '/balance — view your wallet',
     '/deposit — get the TRC20 deposit address',
     '/withdraw — open a withdrawal request',
@@ -62,6 +66,22 @@ export function createTelegramBot(): Bot {
     '/registergroup — register this group in the app',
     '/redpacket <amount> <count> — fund and post a random red envelope in a group'
   ].join('\n')));
+
+  bot.command('wallet', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const wallet = await getWalletSummary(user.id);
+    const keyboard = miniAppKeyboard('🧧 Open Mini App');
+    const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${TEST_CURRENCY_WARNING}` : '';
+    await ctx.reply(
+      [
+        `💳 Available: ${formatMinor(wallet.availableMinor)} USDT`,
+        `🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`,
+        '',
+        'Open the Mini App for your full history, deposits and withdrawals.'
+      ].join('\n') + testNote,
+      { reply_markup: keyboard }
+    );
+  });
 
   bot.command('myid', async (ctx) => {
     if (!ctx.from) return;
@@ -105,11 +125,35 @@ export function createTelegramBot(): Bot {
   });
 
   bot.command('withdraw', async (ctx) => {
-    if (!config.chainOperationsEnabled) {
-      await ctx.reply('Test mode is active. Blockchain withdrawals are disabled. Test balance can only be used for test red envelopes.');
+    const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
+    if (mode === 'disabled') {
+      await ctx.reply(
+        [
+          '⏸ Withdrawals are currently disabled.',
+          '',
+          `Why: this deployment runs in test mode (FUNDS_MODE=test) and no required test address is configured. Real TRC20 payouts need FUNDS_MODE=real with the Tron hot-wallet setup.`,
+          '',
+          'Until then your balance can be used for test red envelopes.'
+        ].join('\n')
+      );
       return;
     }
-    const keyboard = new InlineKeyboard().webApp('🧧 Open Wallet', config.publicAppUrl);
+    const keyboard = miniAppKeyboard('🧧 Open Wallet');
+    if (mode === 'test') {
+      await ctx.reply(
+        [
+          '🧪 Test withdrawal',
+          '',
+          'Withdrawals are simulated in test mode — nothing is sent on the blockchain.',
+          `Required test TRC20 address: ${config.withdrawal.testWithdrawalAddress}`,
+          `Minimum: ${config.withdrawal.minMinor / 1_000_000n} USDT · Fee: ${config.withdrawal.feeMinor / 1_000_000n} USDT`,
+          '',
+          `⚠️ ${TEST_CURRENCY_WARNING}`
+        ].join('\n'),
+        { reply_markup: keyboard }
+      );
+      return;
+    }
     await ctx.reply(
       'Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.',
       { reply_markup: keyboard }
@@ -119,14 +163,15 @@ export function createTelegramBot(): Bot {
   bot.command('history', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
+    const keyboard = miniAppKeyboard('🕘 Full history in Mini App');
     if (!ledger.length) {
-      await ctx.reply('No ledger activity yet.');
+      await ctx.reply('No ledger activity yet. Open the Mini App to see deposits, claims and withdrawals once you start.', { reply_markup: keyboard });
       return;
     }
     const lines = ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) =>
       `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`
     );
-    await ctx.reply(lines.join('\n'));
+    await ctx.reply([lines.join('\n'), '', 'Open the Mini App for your complete history and withdrawal status.'].join('\n'), { reply_markup: keyboard });
   });
 
   bot.command('redpacket', async (ctx) => {
@@ -180,6 +225,22 @@ export function createTelegramBot(): Bot {
     await ctx.answerCallbackQuery();
     await ctx.reply('Use Balance and History to inspect your internal USDT ledger. Open Wallet to create envelopes or request a withdrawal. Never share a seed phrase or private key—the bot will never ask for one.');
   });
+  bot.callbackQuery('menu:withdraw', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
+    if (mode === 'disabled') {
+      await ctx.reply('⏸ Withdrawals are disabled in test mode and no TEST_WITHDRAWAL_ADDRESS is configured. Your balance can be used for test red envelopes.');
+      return;
+    }
+    if (mode === 'test') {
+      await ctx.reply(
+        `🧪 Test withdrawals are simulated and must use the required test address ${config.withdrawal.testWithdrawalAddress}.\n\n⚠️ ${TEST_CURRENCY_WARNING}`,
+        { reply_markup: miniAppKeyboard('🧧 Open Wallet') }
+      );
+      return;
+    }
+    await ctx.reply('Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.', { reply_markup: miniAppKeyboard('🧧 Open Wallet') });
+  });
 
   bot.callbackQuery(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i, async (ctx) => {
     const envelopeId = ctx.callbackQuery.data;
@@ -189,14 +250,39 @@ export function createTelegramBot(): Bot {
       await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
       const result = await claimEnvelope(user.id, envelopeId);
       await ctx.answerCallbackQuery({
-        text: `You claimed ${formatMinor(result.claim.amountMinor)} USDT! New available balance: ${formatMinor(result.availableMinor)} USDT.`,
+        text: `You claimed ${formatMinor(result.claim.amountMinor)} USDT! New available balance: ${formatMinor(result.availableMinor)} USDT. I sent your wallet details to our chat.`,
         show_alert: true
       });
+      // After a claim the user immediately wants their wallet details. Send
+      // them privately (never in the group) with a button straight into the
+      // Mini App. Users who never started the bot cannot be messaged; the
+      // callback alert above still shows the balance in that case.
+      try {
+        const wallet = await getWalletSummary(user.id);
+        const keyboard = miniAppKeyboard('🧧 Open My Wallet');
+        const currencyNote = config.fundsMode === 'test' ? `\n\n⚠️ ${TEST_CURRENCY_WARNING}` : '';
+        await ctx.api.sendMessage(
+          user.telegramId.toString(),
+          [
+            '🧧 <b>Red envelope claimed</b>',
+            '',
+            `Claimed: <b>+${formatMinor(result.claim.amountMinor)} USDT</b>`,
+            `Available: <b>${formatMinor(wallet.availableMinor)} USDT</b>`,
+            `Locked/pending withdrawal: <b>${formatMinor(wallet.lockedMinor)} USDT</b>`,
+            '',
+            'Open the Mini App for your full history, deposit address and withdrawals.'
+          ].join('\n') + currencyNote,
+          { parse_mode: 'HTML', reply_markup: keyboard }
+        );
+      } catch (dmError) {
+        console.warn('[telegram-claim-dm] could not message user (they may not have started the bot)', dmError);
+      }
       const latestEnvelope = await getEnvelope(envelopeId);
       if (latestEnvelope.remainingSlots <= 0) {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
       } else {
         const keyboard = new InlineKeyboard().text(`🧧 Claim red envelope · ${latestEnvelope.remainingSlots} left`, latestEnvelope.id);
+        if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet', config.publicAppUrl);
         await ctx.editMessageReplyMarkup({ reply_markup: keyboard }).catch(() => undefined);
       }
     } catch (error) {

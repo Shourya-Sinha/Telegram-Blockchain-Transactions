@@ -1,6 +1,7 @@
 import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import { formatMinor } from '@red-envelope/shared';
+import { config } from '../config';
 import { AppError } from '../utils/errors';
 
 let activeBot: Bot | undefined;
@@ -14,6 +15,26 @@ export function getTelegramBot(): Bot {
   return activeBot;
 }
 
+/**
+ * Telegram only accepts Mini App (web_app) buttons for HTTPS URLs (plus
+ * localhost for local testing). Guard every webApp button with this so a
+ * misconfigured PUBLIC_APP_URL degrades to a missing button instead of
+ * breaking /start replies or envelope publishing.
+ */
+export function isTelegramWebAppUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Keyboard with a single "open the Mini App" button, or undefined when the URL is not usable. */
+export function miniAppKeyboard(label: string): InlineKeyboard | undefined {
+  return isTelegramWebAppUrl(config.publicAppUrl) ? new InlineKeyboard().webApp(label, config.publicAppUrl) : undefined;
+}
+
 type PublishableEnvelope = {
   id: string;
   groupId: bigint;
@@ -24,7 +45,11 @@ type PublishableEnvelope = {
 };
 
 export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Promise<number> {
+  // The claim button stays first; the wallet button underneath is how a group
+  // member reaches the Mini App and sees their balance/history right where
+  // they claimed, without hunting for the bot menu.
   const keyboard = new InlineKeyboard().text('🧧 Claim red envelope', envelope.id);
+  if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet', config.publicAppUrl);
   const mode = envelope.mode === 'EQUAL' ? 'equal shares' : 'random shares';
   const message = await getTelegramBot().api.sendMessage(
     envelope.groupId.toString(),
