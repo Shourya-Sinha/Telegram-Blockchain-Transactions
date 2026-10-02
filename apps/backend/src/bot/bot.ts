@@ -6,7 +6,7 @@ import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../service
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { registerTelegramGroup } from '../services/groupService';
-import { assertTelegramGroupMembership, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
+import { assertTelegramGroupMembership, chatAppKeyboard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot, walletDeepLink } from '../services/telegramService';
 import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
 import { botTexts, normalizeLocale } from './texts';
@@ -52,11 +52,22 @@ export function createTelegramBot(): Bot {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const locale = normalizeLocale(user.locale);
     const texts = botTexts(locale);
-    // In a group, keep it short: just the launcher button. The full menu with
-    // balance buttons belongs in the private chat so balances are never posted
-    // publicly.
+    const payload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
+    // Groups never accept web_app buttons (Telegram answers BUTTON_TYPE_INVALID
+    // and drops the whole message), so the group reply uses a t.me deep link
+    // that opens the bot's private chat, where the wallet buttons live.
     if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
-      await ctx.reply(texts.startGroup, { reply_markup: miniAppKeyboard(texts.walletGroupButton) });
+      await ctx.reply(texts.startGroup, { reply_markup: chatAppKeyboard(texts.walletGroupButton, ctx.chat.type) });
+      return;
+    }
+    // Arrived through the "Open My Wallet" deep link from a group message.
+    if (payload === 'wallet') {
+      const wallet = await getWalletSummary(user.id);
+      const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
+      await ctx.reply(
+        [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
+        { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+      );
       return;
     }
     const keyboard = new InlineKeyboard()
@@ -94,7 +105,7 @@ export function createTelegramBot(): Bot {
       requested === 'zh'
         ? `✅ 语言已切换为中文 🇨🇳\n\n${texts.walletOpenApp}`
         : `✅ Language switched to English 🇬🇧\n\n${texts.walletOpenApp}`,
-      { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+      { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) }
     );
   });
 
@@ -103,13 +114,13 @@ export function createTelegramBot(): Bot {
     const wallet = await getWalletSummary(user.id);
     const locale = normalizeLocale(user.locale);
     const texts = botTexts(locale);
-    const keyboard = miniAppKeyboard(texts.walletDetailsButton);
 
     // In a group, never post balance details publicly. The reply carries only
-    // the Mini App launcher; the details go to the user's private chat. This is
+    // a wallet launcher (a t.me deep link in groups — web_app buttons are
+    // private-chat only); the details go to the user's private chat. This is
     // how a member opens their wallet right after claiming an envelope.
     if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
-      await ctx.reply(texts.groupWalletPrompt, { reply_markup: keyboard });
+      await ctx.reply(texts.groupWalletPrompt, { reply_markup: chatAppKeyboard(texts.walletGroupButton, ctx.chat.type) });
       try {
         const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
         await ctx.api.sendMessage(
@@ -126,7 +137,7 @@ export function createTelegramBot(): Bot {
     const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
     await ctx.reply(
       [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
-      { reply_markup: keyboard }
+      { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
     );
   });
 
@@ -179,7 +190,7 @@ export function createTelegramBot(): Bot {
       await ctx.reply(texts.withdrawDisabled);
       return;
     }
-    const keyboard = miniAppKeyboard(texts.walletDetailsButton);
+    const keyboard = chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type);
     if (mode === 'test') {
       await ctx.reply(
         [
@@ -198,7 +209,7 @@ export function createTelegramBot(): Bot {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
     const texts = botTexts(normalizeLocale(user.locale));
-    const keyboard = miniAppKeyboard(texts.historyButton);
+    const keyboard = chatAppKeyboard(texts.historyButton, ctx.chat?.type);
     if (!ledger.length) {
       await ctx.reply(texts.historyEmpty, { reply_markup: keyboard });
       return;
@@ -274,11 +285,11 @@ export function createTelegramBot(): Bot {
     if (mode === 'test') {
       await ctx.reply(
         `${texts.withdrawTestShort(config.withdrawal.testWithdrawalAddress ?? '')}\n\n⚠️ ${texts.testCurrencyWarning}`,
-        { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+        { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) }
       );
       return;
     }
-    await ctx.reply(texts.withdrawReal, { reply_markup: miniAppKeyboard(texts.walletDetailsButton) });
+    await ctx.reply(texts.withdrawReal, { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) });
   });
 
   bot.callbackQuery(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i, async (ctx) => {
@@ -324,7 +335,10 @@ export function createTelegramBot(): Bot {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
       } else {
         const keyboard = new InlineKeyboard().text(`🧧 Claim red envelope · ${latestEnvelope.remainingSlots} left`, latestEnvelope.id);
-        if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp(texts.groupWalletButton, config.publicAppUrl);
+        // The envelope message is in a group: web_app buttons are private-chat
+        // only, so attach a t.me deep link instead.
+        const deepLink = walletDeepLink();
+        if (deepLink) keyboard.row().url(texts.groupWalletButton, deepLink);
         await ctx.editMessageReplyMarkup({ reply_markup: keyboard }).catch(() => undefined);
       }
     } catch (error) {

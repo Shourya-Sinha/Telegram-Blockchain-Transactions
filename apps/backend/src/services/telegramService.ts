@@ -35,6 +35,35 @@ export function miniAppKeyboard(label: string): InlineKeyboard | undefined {
   return isTelegramWebAppUrl(config.publicAppUrl) ? new InlineKeyboard().webApp(label, config.publicAppUrl) : undefined;
 }
 
+export function getBotUsername(): string | undefined {
+  return activeBot?.botInfo?.username;
+}
+
+/**
+ * t.me deep link that opens the bot's private chat and runs /start wallet.
+ * Group messages cannot carry native web_app buttons, so this is how a group
+ * member reaches the wallet: one tap opens the bot chat, where the wallet
+ * buttons and the persistent 🧧 menu button live.
+ */
+export function walletDeepLink(): string | undefined {
+  const username = getBotUsername();
+  return username ? `https://t.me/${username}?start=wallet` : undefined;
+}
+
+/**
+ * Native web_app (Mini App) buttons only exist in private chats — sending one
+ * to a group or supergroup makes Telegram reject the whole message with
+ * BUTTON_TYPE_INVALID. Pick the button type by chat: web_app in private chats,
+ * t.me deep link everywhere else.
+ */
+export function chatAppKeyboard(label: string, chatType?: string): InlineKeyboard | undefined {
+  if (chatType === 'group' || chatType === 'supergroup') {
+    const deepLink = walletDeepLink();
+    return deepLink ? new InlineKeyboard().url(label, deepLink) : undefined;
+  }
+  return miniAppKeyboard(label);
+}
+
 type PublishableEnvelope = {
   id: string;
   groupId: bigint;
@@ -47,10 +76,12 @@ type PublishableEnvelope = {
 export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Promise<number> {
   // The claim button stays first; the wallet button underneath is how a group
   // member reaches the Mini App and sees their balance/history right where
-  // they claimed, without hunting for the bot menu. It is bilingual because a
-  // group message is the same for every viewer.
+  // they claimed. It is bilingual because a group message is the same for
+  // every viewer, and it must be a plain t.me deep link — web_app buttons are
+  // rejected by Telegram outside private chats (BUTTON_TYPE_INVALID).
   const keyboard = new InlineKeyboard().text('🧧 Claim red envelope · 领取红包', envelope.id);
-  if (isTelegramWebAppUrl(config.publicAppUrl)) keyboard.row().webApp('💰 Open My Wallet · 打开钱包', config.publicAppUrl);
+  const deepLink = walletDeepLink();
+  if (deepLink) keyboard.row().url('💰 Open My Wallet · 打开钱包', deepLink);
   const mode = envelope.mode === 'EQUAL' ? 'equal shares' : 'random shares';
   const message = await getTelegramBot().api.sendMessage(
     envelope.groupId.toString(),

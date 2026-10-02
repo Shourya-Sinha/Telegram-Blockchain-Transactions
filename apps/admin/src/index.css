@@ -42,3 +42,11 @@
 .sidebar-lang { display: flex; justify-content: center; padding: 0 9px 12px; }
 .login-lang { display: flex; justify-content: center; margin: 0 0 14px; }
 .mobile-top-actions { display: flex; align-items: center; gap: 9px; }
+
+/* Treasury top-up: add test USDT straight into the treasury wallet. */
+.treasury-topup { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 11px; padding: 12px; border: 1px dashed #2b4a63; border-radius: 10px; background: #0c1e30; }
+.treasury-topup label { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 130px; max-width: 220px; color: #8ca1b6; font-size: 9px; }
+.treasury-topup input { padding: 10px 11px; border: 1px solid #2a435c; border-radius: 7px; outline: 0; color: #ecf4fb; background: #091728; font-size: 12px; }
+.treasury-topup .table-action { padding: 11px 14px; white-space: nowrap; }
+.treasury-topup-hint { flex: 1 1 100%; color: #647b93; font-size: 9px; line-height: 1.5; }
+.treasury-alert { flex: 1 1 100%; margin: 0; }

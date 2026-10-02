@@ -17,7 +17,7 @@ There are now **six ways in**, so a user never has to hunt for the wallet:
 | **Chat menu button** — the bot registers a persistent `🧧 Wallet` button | Left of the message-input `📎` button in every chat with the bot. Set automatically at backend startup (needs `PUBLIC_APP_URL` to be HTTPS, or `localhost` while developing). |
 | **`/start`** | Replies with the `🧧 Open Red Envelope Wallet` button (private chat). In a group it replies with just the launcher button — no balance is posted publicly. |
 | **`/wallet`** | Replies with balance, locked amount and an `🧧 Open My Wallet` button. **Works inside groups too** (see below). |
-| **The red envelope message itself** | Every envelope posted in a group now carries a second button — `💰 Open My Wallet · 打开钱包` — directly under `🧧 Claim red envelope · 领取红包`. |
+| **The red envelope message itself** | Every envelope posted in a group carries a second button — `💰 Open My Wallet · 打开钱包` — directly under `🧧 Claim red envelope · 领取红包`. Telegram only allows native Mini App buttons in private chats, so in groups this button is a `t.me` deep link that opens the bot's private chat, where the wallet opens immediately. |
 | **The private message after every claim** | Right after claiming, the bot sends the user a private message with their claimed amount, available balance, locked balance, and an `🧧 Open My Wallet` button. |
 | **`/lang`, `/balance`, `/history`…** | Every bot reply that shows wallet information also carries a Mini App launcher button. |
 
@@ -27,7 +27,7 @@ The bot also registers its full command list (`/start`, `/wallet`, `/balance`, `
 
 When a group is registered (`/registergroup`) and a member taps **Claim red envelope · 领取红包**:
 
-1. The envelope message **in the group itself** carries the `💰 Open My Wallet · 打开钱包` button — one tap opens the Mini App with balance, history and withdrawals. No command needed.
+1. The envelope message **in the group itself** carries the `💰 Open My Wallet · 打开钱包` button. Telegram rejects native Mini App buttons outside private chats (`BUTTON_TYPE_INVALID`), so in a group this button is a `t.me/<bot>?start=wallet` deep link — one tap opens the bot's private chat and the wallet message with the real Mini App button appears there. No command needed.
 2. A Telegram alert immediately shows the claimed amount and the new available balance.
 3. The bot sends a **private message** (never posted in the group) with:
    - Claimed amount (`+X USDT`)

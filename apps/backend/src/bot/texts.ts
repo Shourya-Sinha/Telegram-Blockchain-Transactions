@@ -14,12 +14,12 @@ export function normalizeLocale(value: string | null | undefined): BotLocale {
 const en = {
   startWelcome: (telegramId: number | undefined) =>
     `Welcome to Red Envelope Wallet 🧧\n\nYour account is secured by Telegram ID ${telegramId}. Your display name and @username are profile labels only and never identify financial ownership.\n\nTap "🧧 Open Red Envelope Wallet" or the 💳 button next to the message input to open your Mini App any time.`,
-  startGroup: '🧧 Red Envelope Wallet\n\nOpen your wallet to check your balance, history and withdrawals.',
+  startGroup: '🧧 Red Envelope Wallet\n\nTap the button below to open your wallet (balance, history, withdrawals). It opens in your private chat with the bot — your details are never shown in the group.',
   walletButton: '🧧 Open Red Envelope Wallet',
   walletDetailsButton: '🧧 Open My Wallet',
   walletMiniButton: '🧧 Open Mini App',
   walletGroupButton: '🧧 Open My Wallet',
-  groupWalletPrompt: '🧧 Tap the button below to open your wallet (balance, history, withdrawals).\nYour details were sent to you privately.',
+  groupWalletPrompt: '🧧 Tap the button below to open your wallet (balance, history, withdrawals). It opens in your private chat with the bot; your details were also sent there.',
   walletDetails:
     (available: string, locked: string) =>
       `💳 Available: ${available} USDT\n🔒 Locked/pending withdrawal: ${locked} USDT`,
@@ -49,12 +49,12 @@ const en = {
 const zh = {
   startWelcome: (telegramId: number | undefined) =>
     `欢迎来到红包钱包 🧧\n\n您的账户由 Telegram ID ${telegramId} 安全保障。显示名称与 @用户名仅作为资料标签，绝不作为资金所有权的标识。\n\n点击「🧧 打开红包钱包」或输入框旁的 💳 按钮即可随时打开小程序。`,
-  startGroup: '🧧 红包钱包\n\n打开钱包查看余额、历史记录与提现。',
+  startGroup: '🧧 红包钱包\n\n点击下方按钮打开您的钱包（余额、历史记录、提现）。按钮将在与机器人的私聊中打开钱包——您的资产信息绝不会显示在群内。',
   walletButton: '🧧 打开红包钱包',
   walletDetailsButton: '🧧 打开我的钱包',
   walletMiniButton: '🧧 打开小程序',
   walletGroupButton: '🧧 打开我的钱包',
-  groupWalletPrompt: '🧧 点击下方按钮打开您的钱包（余额、历史记录、提现）。\n您的资产详情已通过私聊发送给您。',
+  groupWalletPrompt: '🧧 点击下方按钮打开您的钱包（余额、历史记录、提现）。按钮将在与机器人的私聊中打开钱包；您的资产详情也已发送至该私聊。',
   walletDetails:
     (available: string, locked: string) =>
       `💳 可用余额：${available} USDT\n🔒 锁定/提现处理中：${locked} USDT`,

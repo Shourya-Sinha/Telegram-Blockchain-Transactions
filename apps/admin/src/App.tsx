@@ -42,6 +42,7 @@ function EnvelopesPage() {
   const t = useT();
   const client = useQueryClient();
   const setup = useQuery({ queryKey: ['envelope-setup'], queryFn: () => adminApi<EnvelopeSetup>('/api/admin/envelopes/setup') });
+  const testing = useQuery({ queryKey: ['testing'], queryFn: () => adminApi<{ fundsMode: 'test' | 'real'; testCreditEnabled: boolean }>('/api/admin/testing') });
   const [groupId, setGroupId] = useState('');
   const [total, setTotal] = useState('10');
   const [count, setCount] = useState(5);
@@ -49,6 +50,27 @@ function EnvelopesPage() {
   const [expiresInMinutes, setExpiresInMinutes] = useState(1440);
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState<'success' | 'danger'>('danger');
+  const [treasuryAmount, setTreasuryAmount] = useState('1000');
+  const [treasuryMessage, setTreasuryMessage] = useState('');
+  const [treasuryTone, setTreasuryTone] = useState<'success' | 'danger'>('danger');
+  // Top up the treasury wallet directly from the console — the same audited
+  // ledger operation as `npm run db:dev-credit -- <treasury-id> <amount>`.
+  const treasuryCredit = useMutation({
+    mutationFn: () => adminApi<{ availableMinor: string }>(`/api/admin/users/${setup.data!.treasury!.id}/test-credit`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: treasuryAmount, reason: 'Treasury top-up from admin console' })
+    }),
+    onSuccess: (result) => {
+      setTreasuryMessage(t('treasuryCredited', treasuryAmount, money(result.availableMinor)));
+      setTreasuryTone('success');
+      void client.invalidateQueries({ queryKey: ['envelope-setup'] });
+      void client.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error) => {
+      setTreasuryMessage(error instanceof Error ? error.message : t('unableToAddBalance'));
+      setTreasuryTone('danger');
+    }
+  });
   const send = useMutation({
     mutationFn: () => adminApi<{ envelope: { id: string } }>('/api/admin/envelopes/send', {
       method: 'POST',
@@ -81,6 +103,16 @@ function EnvelopesPage() {
         <div className="settings-grid"><label>{t('totalUsdt')}<input value={total} inputMode="decimal" onChange={(event) => setTotal(event.target.value)} /></label><label>{t('numberOfClaims')}<input type="number" min="1" max="500" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label><label>{t('distribution')}<select value={mode} onChange={(event) => setMode(event.target.value as 'RANDOM' | 'EQUAL')}><option value="RANDOM">{t('randomShares')}</option><option value="EQUAL">{t('equalShares')}</option></select></label></div>
         <label>{t('expires')}<select value={expiresInMinutes} onChange={(event) => setExpiresInMinutes(Number(event.target.value))}><option value={60}>{t('inOneHour')}</option><option value={1440}>{t('in24Hours')}</option><option value={10080}>{t('in7Days')}</option></select></label>
         <div className="treasury-line"><span>{t('treasuryWallet')}</span><strong>{setup.data?.treasury ? t('usdtAvailable', money(setup.data.treasury.wallet?.availableMinor)) : setup.data?.treasuryTelegramIdConfigured ? t('idConfigured') : t('telegramIdNotConfigured')}</strong></div>
+        {setup.data?.treasury && <div className="treasury-topup">
+          {testing.data?.testCreditEnabled
+            ? <>
+              <label>{t('amountUsdt')}<input value={treasuryAmount} inputMode="decimal" onChange={(event) => setTreasuryAmount(event.target.value)} /></label>
+              <button className="table-action" disabled={treasuryCredit.isPending || !treasuryAmount} onClick={() => { if (window.confirm(t('confirmAddCredit', treasuryAmount, t('treasuryWallet')))) { setTreasuryMessage(''); treasuryCredit.mutate(); } }}>{treasuryCredit.isPending ? t('adding') : t('addTreasuryUsdt')}</button>
+              <small className="treasury-topup-hint">{t('treasuryTopUpNote')}</small>
+            </>
+            : <small className="treasury-topup-hint"><strong>{t('testCreditsDisabled')}</strong> {t('testCreditsDisabledNote')}</small>}
+          {treasuryMessage && <div className={`alert ${treasuryTone} treasury-alert`}>{treasuryMessage}</div>}
+        </div>}
         {message && <div className={`alert ${messageTone}`}>{message}</div>}
         <button className="login-button save-button" disabled={!setup.data?.configured || !groupId || send.isPending} onClick={() => { setMessage(''); send.mutate(); }}>{send.isPending ? t('fundingPosting') : t('sendToGroup')}</button>
       </section>
