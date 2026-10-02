@@ -40,6 +40,21 @@ const depositMode = required('DEPOSIT_MODE', fundsMode === 'real' ? 'unique' : '
 if (!['test', 'real'].includes(fundsMode)) throw new Error('FUNDS_MODE must be test or real');
 if (!['disabled', 'unique'].includes(depositMode)) throw new Error('DEPOSIT_MODE must be disabled or unique');
 
+/**
+ * Required TRC20 destination address for simulated withdrawals while
+ * FUNDS_MODE=test. When set, users can exercise the full withdrawal flow
+ * (amount + fee reserved, settled, recorded) against exactly this address and
+ * no real TRC20 transaction is ever broadcast. Leaving it empty keeps the
+ * withdrawal button disabled in test mode.
+ */
+const testWithdrawalAddress = required('TEST_WITHDRAWAL_ADDRESS').trim();
+if (testWithdrawalAddress && !testWithdrawalAddress.match(/^T[1-9A-HJ-NP-Za-km-z]{33}$/)) {
+  throw new Error('TEST_WITHDRAWAL_ADDRESS must be a valid TRON (TRC20) address such as TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj');
+}
+if (fundsMode === 'real' && testWithdrawalAddress) {
+  throw new Error('TEST_WITHDRAWAL_ADDRESS must not be set when FUNDS_MODE=real; real withdrawals go to any user-supplied TRC20 address');
+}
+
 export const config = {
   nodeEnv,
   fundsMode: fundsMode as 'test' | 'real',
@@ -67,7 +82,10 @@ export const config = {
   withdrawal: {
     minMinor: BigInt(Math.round(number('WITHDRAWAL_MIN_USDT', 20) * 1_000_000)),
     feeMinor: BigInt(Math.round(number('WITHDRAWAL_FEE_USDT', 1) * 1_000_000)),
-    autoApprovalLimitMinor: BigInt(Math.round(number('WITHDRAWAL_AUTO_APPROVAL_LIMIT', 50) * 1_000_000))
+    autoApprovalLimitMinor: BigInt(Math.round(number('WITHDRAWAL_AUTO_APPROVAL_LIMIT', 50) * 1_000_000)),
+    testWithdrawalAddress,
+    // Simulated withdrawals are a test-mode feature only.
+    testWithdrawalsEnabled: fundsMode === 'test' && Boolean(testWithdrawalAddress)
   },
   rateLimitPerMinute: number('RATE_LIMIT_PER_MINUTE', 60),
   claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20),

@@ -12,5 +12,23 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 export interface WalletResponse { id: string; availableMinor: string; lockedMinor: string; version: number; }
-export interface MeResponse { id: string; telegramId: string; firstName: string; username?: string; isAdmin: boolean; wallet: WalletResponse; fundsMode: 'test' | 'real'; depositsEnabled: boolean; withdrawalsEnabled: boolean; depositAddress?: string; }
+export type WithdrawalMode = 'real' | 'test' | 'disabled';
+export interface MeResponse {
+  id: string; telegramId: string; firstName: string; username?: string; isAdmin: boolean;
+  wallet: WalletResponse; fundsMode: 'test' | 'real';
+  depositsEnabled: boolean;
+  withdrawalsEnabled: boolean;
+  withdrawalMode: WithdrawalMode;
+  locale: 'en' | 'zh';
+  withdrawalMinMinor?: string;
+  withdrawalFeeMinor?: string;
+  testWithdrawalAddress?: string;
+  testCurrencyWarning?: string;
+  depositAddress?: string;
+}
 export interface LedgerEntry { id: string; amountMinor: string; type: string; direction: 'CREDIT' | 'DEBIT'; createdAt: string; referenceId?: string; }
+export interface Withdrawal {
+  id: string; amountMinor: string; feeMinor: string; toAddress: string; chain: string;
+  txHash?: string | null; status: 'QUEUED' | 'PROCESSING' | 'BROADCAST' | 'CONFIRMING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
+  createdAt: string; completedAt?: string | null;
+}

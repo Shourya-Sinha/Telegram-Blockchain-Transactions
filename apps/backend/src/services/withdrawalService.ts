@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { LedgerType, WithdrawalStatus } from '../utils/prismaEnums';
-import { parseUsdtToMinor, withdrawalRequestSchema } from '@red-envelope/shared';
+import { isAllowedTestWithdrawalAddress, parseUsdtToMinor, withdrawalRequestSchema } from '@red-envelope/shared';
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { config } from '../config';
@@ -17,7 +17,6 @@ async function lockWithdrawal(tx: Transaction, id: string) {
 }
 
 export async function createWithdrawal(userId: string, input: RequestInput) {
-  if (!config.chainOperationsEnabled) throw new AppError(403, 'Blockchain withdrawals are disabled in test mode', 'TEST_MODE');
   const parsed = withdrawalRequestSchema.parse(input);
   const amountMinor = parseUsdtToMinor(parsed.amount);
   if (amountMinor < config.withdrawal.minMinor) throw new AppError(400, `Minimum withdrawal is ${config.withdrawal.minMinor / 1_000_000n} USDT`, 'WITHDRAWAL_TOO_SMALL');
@@ -28,15 +27,76 @@ export async function createWithdrawal(userId: string, input: RequestInput) {
   }
   if ((await redis.get('emergency:withdrawals-disabled')) === '1') throw new AppError(503, 'Withdrawals are temporarily disabled', 'WITHDRAWALS_DISABLED');
 
+  if (!config.chainOperationsEnabled) {
+    if (!config.withdrawal.testWithdrawalsEnabled) {
+      // Why the button is off: this deployment runs FUNDS_MODE=test and no
+      // TEST_WITHDRAWAL_ADDRESS is configured, so there is nothing safe to
+      // withdraw to. Real TRC20 payouts require FUNDS_MODE=real plus the Tron
+      // hot-wallet environment.
+      throw new AppError(403, 'Withdrawals are disabled: this deployment runs in test mode (FUNDS_MODE=test) and no TEST_WITHDRAWAL_ADDRESS is configured. Set TEST_WITHDRAWAL_ADDRESS to the required test TRC20 address to enable simulated test withdrawals.', 'TEST_MODE');
+    }
+    return createSimulatedTestWithdrawal(userId, input, { ...parsed, amountMinor, feeMinor, idempotencyKey });
+  }
+
   try {
     const withdrawal = await prisma.$transaction(async (tx: Transaction) => {
       const created = await tx.withdrawal.create({ data: { userId, amountMinor, feeMinor, toAddress: parsed.toAddress, idempotencyKey, status: WithdrawalStatus.QUEUED, fundsReserved: true } });
-      await reserveWallet(tx, userId, amountMinor, LedgerType.WITHDRAWAL, 'WITHDRAWAL', created.id);
-      const feeReserve = await reserveWallet(tx, userId, feeMinor, LedgerType.FEE, 'WITHDRAWAL', created.id);
+      const amountReserve = await reserveWallet(tx, userId, amountMinor, LedgerType.WITHDRAWAL, 'WITHDRAWAL', created.id);
+      const feeReserve = feeMinor > 0n ? await reserveWallet(tx, userId, feeMinor, LedgerType.FEE, 'WITHDRAWAL', created.id) : undefined;
+      const latest = feeReserve ?? amountReserve;
       await writeAudit(tx, { action: 'WITHDRAWAL_REQUESTED', entityType: 'Withdrawal', entityId: created.id, ipAddress: input.ipAddress, after: { amountMinor: amountMinor.toString(), feeMinor: feeMinor.toString(), reservedMinor: (amountMinor + feeMinor).toString(), toAddress: parsed.toAddress, idempotencyKey } });
-      return { ...created, availableMinor: feeReserve.availableMinor, lockedMinor: feeReserve.lockedMinor };
+      return { ...created, availableMinor: latest.availableMinor, lockedMinor: latest.lockedMinor };
     }, { isolationLevel: 'ReadCommitted' });
     if (amountMinor <= config.withdrawal.autoApprovalLimitMinor) await withdrawalQueue.add('process', { withdrawalId: withdrawal.id }, { jobId: withdrawal.id, removeOnComplete: 100, removeOnFail: 100 });
+    return withdrawal;
+  } catch (error) {
+    if (isPrismaUniqueError(error)) throw new AppError(409, 'This withdrawal request has already been submitted', 'IDEMPOTENCY_CONFLICT');
+    throw error;
+  }
+}
+
+/**
+ * Test-mode withdrawal: the full ledger flow (reserve amount + fee, then
+ * settle) runs inside one transaction, but no TRC20 transaction is ever
+ * broadcast. The destination must be exactly the required test address from
+ * TEST_WITHDRAWAL_ADDRESS, and the record completes with an explicit
+ * "simulated" audit trail so finance can tell it apart from real payouts.
+ */
+async function createSimulatedTestWithdrawal(
+  userId: string,
+  input: RequestInput,
+  parsed: { toAddress: string; amountMinor: bigint; feeMinor: bigint; idempotencyKey: string }
+) {
+  if (!isAllowedTestWithdrawalAddress(parsed.toAddress, config.withdrawal.testWithdrawalAddress)) {
+    throw new AppError(403, `Test withdrawals must use the required test TRC20 address: ${config.withdrawal.testWithdrawalAddress}`, 'TEST_WITHDRAWAL_ADDRESS_REQUIRED');
+  }
+  try {
+    const withdrawal = await prisma.$transaction(async (tx: Transaction) => {
+      const created = await tx.withdrawal.create({ data: { userId, amountMinor: parsed.amountMinor, feeMinor: parsed.feeMinor, toAddress: parsed.toAddress, idempotencyKey: parsed.idempotencyKey, status: WithdrawalStatus.QUEUED, fundsReserved: true } });
+      const amountReserve = await reserveWallet(tx, userId, parsed.amountMinor, LedgerType.WITHDRAWAL, 'WITHDRAWAL', created.id);
+      const feeReserve = parsed.feeMinor > 0n ? await reserveWallet(tx, userId, parsed.feeMinor, LedgerType.FEE, 'WITHDRAWAL', created.id) : undefined;
+      const latestReserve = feeReserve ?? amountReserve;
+      await writeAudit(tx, {
+        action: 'WITHDRAWAL_REQUESTED',
+        entityType: 'Withdrawal',
+        entityId: created.id,
+        ipAddress: input.ipAddress,
+        after: { amountMinor: parsed.amountMinor.toString(), feeMinor: parsed.feeMinor.toString(), reservedMinor: (parsed.amountMinor + parsed.feeMinor).toString(), toAddress: parsed.toAddress, idempotencyKey: parsed.idempotencyKey, mode: 'test', simulated: true }
+      });
+      // Simulated payout: settle the reservation immediately. The wallet moves
+      // from reserved back to nothing — available was already debited above,
+      // exactly like a real completed withdrawal.
+      await settleReservedWallet(tx, userId, parsed.amountMinor + parsed.feeMinor);
+      const completed = await tx.withdrawal.update({ where: { id: created.id }, data: { status: WithdrawalStatus.COMPLETED, fundsReserved: false, completedAt: new Date() } });
+      await writeAudit(tx, {
+        action: 'WITHDRAWAL_TEST_COMPLETED',
+        entityType: 'Withdrawal',
+        entityId: created.id,
+        ipAddress: input.ipAddress,
+        after: { status: WithdrawalStatus.COMPLETED, simulated: true, note: 'Simulated test-mode withdrawal. No TRC20 transaction was broadcast. Test currency only.' }
+      });
+      return { ...completed, availableMinor: latestReserve.availableMinor, lockedMinor: latestReserve.lockedMinor };
+    }, { isolationLevel: 'ReadCommitted' });
     return withdrawal;
   } catch (error) {
     if (isPrismaUniqueError(error)) throw new AppError(409, 'This withdrawal request has already been submitted', 'IDEMPOTENCY_CONFLICT');

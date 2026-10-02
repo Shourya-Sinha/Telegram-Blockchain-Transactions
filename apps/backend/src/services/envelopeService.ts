@@ -29,24 +29,33 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
   if (!group.enabled) throw new AppError(403, 'Red envelopes are disabled in this group', 'GROUP_DISABLED');
   if (totalMinor < BigInt(parsed.count)) throw new AppError(400, 'Each slot must contain at least 0.000001 USDT', 'AMOUNT_TOO_SMALL');
   const id = randomUUID();
-  return prisma.$transaction(async (tx: Transaction) => {
-    const envelope = await tx.redEnvelope.create({ data: {
-      id,
-      senderId,
-      groupId,
-      messageId: input.messageId ?? 0,
-      totalMinor,
-      remainingMinor: totalMinor,
-      totalSlots: parsed.count,
-      remainingSlots: parsed.count,
-      mode: parsed.mode as EnvelopeMode,
-      expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
-      status: EnvelopeStatus.ACTIVE
-    } });
-    const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
-    await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId } });
-    return { envelope, availableMinor: debit.availableMinor };
-  }, { isolationLevel: 'ReadCommitted' });
+  try {
+    return await prisma.$transaction(async (tx: Transaction) => {
+      const envelope = await tx.redEnvelope.create({ data: {
+        id,
+        senderId,
+        groupId,
+        messageId: input.messageId ?? 0,
+        totalMinor,
+        remainingMinor: totalMinor,
+        totalSlots: parsed.count,
+        remainingSlots: parsed.count,
+        mode: parsed.mode as EnvelopeMode,
+        expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
+        status: EnvelopeStatus.ACTIVE
+      } });
+      const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
+      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId } });
+      return { envelope, availableMinor: debit.availableMinor };
+    }, { isolationLevel: 'ReadCommitted' });
+  } catch (error) {
+    // Turn the bare ledger rejection into an actionable message: include how
+    // much the envelope needs so the user knows what to top up.
+    if (error instanceof AppError && error.code === 'INSUFFICIENT_BALANCE') {
+      throw new AppError(400, `Insufficient available balance: this envelope needs ${parsed.total} USDT but your available balance is lower. Top up your wallet and try again.`, 'INSUFFICIENT_BALANCE');
+    }
+    throw error;
+  }
 }
 
 async function lockEnvelope(tx: Transaction, envelopeId: string): Promise<void> {
