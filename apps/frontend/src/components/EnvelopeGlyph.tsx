@@ -16,13 +16,13 @@ export function EnvelopeGlyph({ open = false, size = 40 }: { open?: boolean; siz
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="0.9" y2="1">
           {open
-            ? <><stop offset="0" stopColor="#f6b7b0" /><stop offset="1" stopColor="#dd8f8a" /></>
-            : <><stop offset="0" stopColor="#f7594f" /><stop offset="1" stopColor="#cf3641" /></>}
+            ? <><stop offset="0" stopColor="#e5855f" /><stop offset="1" stopColor="#d85940" /></>
+            : <><stop offset="0" stopColor="#f5453e" /><stop offset="1" stopColor="#cc3639" /></>}
         </linearGradient>
         <linearGradient id={flapId} x1="0" y1="0" x2="0.9" y2="1">
           {open
-            ? <><stop offset="0" stopColor="#f0a49d" /><stop offset="1" stopColor="#d67f7a" /></>
-            : <><stop offset="0" stopColor="#e94b45" /><stop offset="1" stopColor="#bd2b3a" /></>}
+            ? <><stop offset="0" stopColor="#e59a77" /><stop offset="1" stopColor="#d69174" /></>
+            : <><stop offset="0" stopColor="#e9393b" /><stop offset="1" stopColor="#bd2f38" /></>}
         </linearGradient>
       </defs>
       {/* cream message card, only visible once the envelope is open */}
