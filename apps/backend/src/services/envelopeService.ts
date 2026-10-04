@@ -43,7 +43,7 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
         mode: parsed.mode as EnvelopeMode,
         expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
         status: EnvelopeStatus.ACTIVE
-      } });
+      }, include: { sender: { select: { firstName: true } } } });
       const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
       await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId } });
       return { envelope, availableMinor: debit.availableMinor };

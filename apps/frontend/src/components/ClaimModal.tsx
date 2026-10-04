@@ -1,32 +1,131 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Modal } from './Modal';
-import { api } from '../api';
-import { successHaptic } from '../telegram';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, api, type ClaimResponse, type EnvelopeDetail } from '../api';
+import { haptic, successHaptic } from '../telegram';
 import { useT } from '../i18n';
+import { formatClock, formatMinor } from './EnvelopeRow';
 
-function formatMinor(value: string | bigint | undefined): string { if (!value) return '0.00'; const n = BigInt(value); return `${n / 1_000_000n}.${(n % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`; }
+type Phase = 'sealed' | 'opening' | 'done';
+
+/** How long the flap/coin animation runs before the result is revealed. */
+const OPEN_ANIMATION_MS = 1250;
+
+/**
+ * WeChat-style red envelope opening flow.
+ *
+ * sealed  — bright red envelope with sender name, blessing, and a pulsing gold
+ *           seal; tapping it starts the claim.
+ * opening — the flap lifts, the seal bursts, and gold coins fly out.
+ * done    — the pocket fades to light red with the flap up, the claimed amount
+ *           is revealed, and the claim-details list (who took what, when)
+ *           appears below — exactly like WeChat's "opened" state.
+ *
+ * Reopening an envelope that this viewer already claimed (from history) skips
+ * straight to the opened view.
+ */
 export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClose: () => void }) {
   const t = useT();
-  const [phase, setPhase] = useState<'closed' | 'opening' | 'done'>('closed');
-  const [amount, setAmount] = useState<string>();
-  const [message, setMessage] = useState('');
   const client = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: () => api<{ kind: string; claim?: { amountMinor: string }}>(`/api/envelopes/${envelopeId}/claim`, { method: 'POST' }),
-    onSuccess: (result) => {
-      setPhase('done');
-      if (result.kind === 'claimed') {
-        setAmount(result.claim?.amountMinor);
-        successHaptic();
-        void client.invalidateQueries({ queryKey: ['me'] });
-        void client.invalidateQueries({ queryKey: ['ledger'] });
-      } else {
-        setMessage(t('envelopeGone'));
-      }
-    },
-    onError: (error) => { setPhase('done'); setMessage(error instanceof Error ? error.message : t('claimInTelegram')); }
+  const [phase, setPhase] = useState<Phase>('sealed');
+  const [animDone, setAnimDone] = useState(false);
+
+  const detail = useQuery({
+    queryKey: ['envelope', envelopeId],
+    queryFn: () => api<EnvelopeDetail>(`/api/envelopes/${envelopeId}`),
+    retry: false
   });
-  useEffect(() => { setPhase('opening'); const timer = setTimeout(() => mutation.mutate(), 850); return () => clearTimeout(timer); }, []);
-  return <Modal title={t('claimTitle')} onClose={onClose}><div className="claim-content"><div className={phase === 'opening' ? 'envelope-art opening' : 'envelope-art'}><div className="envelope-flap">✦</div><div className="envelope-body">🧧</div></div>{phase !== 'done' && <><h3 className="claim-title">{t('claimOpening')}</h3><p className="muted">{t('claimOpeningHint')}</p></>}{phase === 'done' && amount && <><div className="claim-amount">+{formatMinor(amount)} <span>USDT</span></div><p className="muted">{t('claimAdded')}</p></>}{phase === 'done' && !amount && message && <div className="error-box">{message}</div>}<button className="secondary-button" onClick={onClose}>{t('done')}</button></div></Modal>;
+
+  const mutation = useMutation({
+    mutationFn: () => api<ClaimResponse>(`/api/envelopes/${envelopeId}/claim`, { method: 'POST' }),
+    onSuccess: () => {
+      successHaptic();
+      void client.invalidateQueries({ queryKey: ['me'] });
+      void client.invalidateQueries({ queryKey: ['ledger'] });
+      void client.invalidateQueries({ queryKey: ['envelope', envelopeId] });
+    }
+  });
+
+  const myClaim = detail.data?.claims.find((claim) => claim.mine);
+
+  // Already opened by this viewer (arrived via a history row): show the
+  // opened detail view immediately, no seal to tap.
+  useEffect(() => {
+    if (phase === 'sealed' && myClaim && !mutation.isPending) setPhase('done');
+  }, [phase, myClaim, mutation.isPending]);
+
+  const openEnvelope = () => {
+    if (phase !== 'sealed' || mutation.isPending) return;
+    haptic('medium');
+    setPhase('opening');
+    mutation.mutate();
+    window.setTimeout(() => setAnimDone(true), OPEN_ANIMATION_MS);
+  };
+
+  // The reveal waits for both the flap animation and the ledger result.
+  useEffect(() => {
+    if (phase !== 'opening' || !animDone || mutation.isPending) return;
+    setPhase('done');
+  }, [phase, animDone, mutation.isPending]);
+
+  const claimed = mutation.isSuccess ? mutation.data.claim.amountMinor : myClaim?.amountMinor;
+  const error = mutation.isError ? mutation.error : undefined;
+  const errorCode = error instanceof ApiError ? error.code : undefined;
+  const missMessage = errorCode === 'ALREADY_CLAIMED' ? t('alreadyClaimedNote')
+    : errorCode === 'ENVELOPE_CLOSED' ? t('envelopeFullyClaimed')
+      : errorCode === 'ENVELOPE_EXPIRED' ? t('envelopeExpiredMsg')
+        : (error instanceof Error && error.message) || t('envelopeGone');
+
+  const senderName = detail.data?.sender.firstName?.trim();
+  const senderTitle = senderName ? t('redEnvelopeFrom', { name: senderName }) : t('redEnvelopeGeneric');
+  const claims = detail.data?.claims ?? [];
+
+  return <div className="hongbao-overlay" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <button className="hb-close" onClick={() => { haptic(); onClose(); }} aria-label={t('done')}>×</button>
+    <header className="hb-sender">
+      <span className="hb-sender-avatar">{(senderName ?? '🧧').slice(0, 1).toUpperCase()}</span>
+      <strong>{senderTitle}</strong>
+      <p className="hb-blessing" lang="zh">{t('blessing')}</p>
+    </header>
+
+    <div
+      className={`hb-envelope phase-${phase}`}
+      onClick={openEnvelope}
+      role={phase === 'sealed' ? 'button' : undefined}
+      tabIndex={phase === 'sealed' ? 0 : undefined}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEnvelope(); } }}
+    >
+      <div className="hb-body">
+        <div className="hb-reveal">
+          {phase === 'done' && claimed && <>
+            <span className="hb-reveal-label">{t('claimAdded')}</span>
+            <div className="hb-amount">+{formatMinor(claimed)} <small>USDT</small></div>
+          </>}
+          {phase === 'done' && !claimed && <div className="hb-missed">{missMessage}</div>}
+        </div>
+        <div className="hb-flap">
+          <div className="hb-flap-shape" />
+          {phase === 'sealed' && <button className="hb-seal" onClick={openEnvelope} aria-label={t('tapToOpen')}><span lang="zh">福</span></button>}
+        </div>
+        {phase === 'opening' && <div className="hb-coins" aria-hidden="true">{Array.from({ length: 9 }).map((_, index) => <span key={index} />)}</div>}
+      </div>
+    </div>
+
+    <p className="hb-hint" aria-live="polite">
+      {phase === 'sealed' && t('tapToOpen')}
+      {phase === 'opening' && t('claimOpening')}
+      {phase === 'done' && claimed && t('blessing')}
+    </p>
+
+    {phase === 'done' && claims.length > 0 && <div className="hb-claims">
+      <div className="hb-claims-title">{t('claimDetails')} · {claims.length}/{detail.data?.totalSlots ?? claims.length}</div>
+      {claims.map((claim) => <div className="hb-claim" key={claim.id}>
+        <span className="hb-claim-avatar">{(claim.user.firstName || '?').slice(0, 1).toUpperCase()}</span>
+        <span className="hb-claim-name">{claim.user.firstName}{claim.mine && <em>{t('youLabel')}</em>}</span>
+        <small className="hb-claim-time">{formatClock(claim.claimedAt)}</small>
+        <span className="hb-claim-amount">{formatMinor(claim.amountMinor)}</span>
+      </div>)}
+    </div>}
+
+    <button className="hb-done" onClick={onClose}>{t('done')}</button>
+  </div>;
 }
