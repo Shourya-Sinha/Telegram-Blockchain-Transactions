@@ -134,6 +134,37 @@ export async function getWalletSummary(userId: string) {
   return wallet;
 }
 
+// Local structural types keep this file type-safe even where inference is
+// unavailable; they are fully compatible with the generated Prisma client.
+type LedgerEntryRow = { id: string; userId: string; amountMinor: bigint; type: string; direction: string; balanceAfterMinor: bigint; referenceType: string; referenceId: string; createdAt: Date };
+type EnvelopeMetaRow = { id: string; mode: string; totalSlots: number; remainingSlots: number; status: string; sender: { firstName: string; username: string | null } };
+
 export async function getLedger(userId: string, limit = 50) {
-  return prisma.ledgerEntry.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: Math.min(Math.max(limit, 1), 100) });
+  const entries = (await prisma.ledgerEntry.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: Math.min(Math.max(limit, 1), 100) })) as LedgerEntryRow[];
+  // WeChat-style history rows need to know who sent each envelope and how it
+  // was shared, so batch-load the metadata for every RED_ENVELOPE reference
+  // on this page instead of one query per row.
+  const envelopeIds = [...new Set(entries.filter((entry) => entry.referenceType === 'RED_ENVELOPE').map((entry) => entry.referenceId))];
+  if (envelopeIds.length === 0) return entries;
+  const envelopes = (await prisma.redEnvelope.findMany({
+    where: { id: { in: envelopeIds } },
+    select: {
+      id: true,
+      mode: true,
+      totalSlots: true,
+      remainingSlots: true,
+      status: true,
+      sender: { select: { firstName: true, username: true } }
+    }
+  })) as EnvelopeMetaRow[];
+  const byId = new Map(envelopes.map((envelope) => [envelope.id, {
+    id: envelope.id,
+    senderFirstName: envelope.sender.firstName,
+    senderUsername: envelope.sender.username,
+    mode: envelope.mode,
+    totalSlots: envelope.totalSlots,
+    remainingSlots: envelope.remainingSlots,
+    status: envelope.status
+  }]));
+  return entries.map((entry) => ({ ...entry, envelope: byId.get(entry.referenceId) }));
 }

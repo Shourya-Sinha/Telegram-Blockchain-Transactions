@@ -114,6 +114,7 @@ type PublishableEnvelope = {
   totalSlots: number;
   mode: string;
   expiresAt: Date;
+  sender?: { firstName?: string | null } | null;
 };
 
 export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Promise<number> {
@@ -125,17 +126,24 @@ export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Pro
   const keyboard = new InlineKeyboard().text('🧧 Claim red envelope · 领取红包', envelope.id);
   const deepLink = walletDeepLink();
   if (deepLink) keyboard.row().url('💰 Open My Wallet · 打开钱包', deepLink);
-  const mode = envelope.mode === 'EQUAL' ? 'equal shares' : 'random shares';
+  const mode = envelope.mode === 'EQUAL' ? 'even split · 平均' : 'lucky draw · 拼手气';
+  const senderName = envelope.sender?.firstName?.trim();
+  // WeChat-style announcement: "{name}'s red envelope" plus the classic
+  // blessing, so the arriving message reads like a red envelope, not a report.
+  const title = senderName
+    ? `🧧 ${senderName}'s red envelope · ${senderName} 的红包`
+    : '🧧 Red envelope · 红包';
   const message = await getTelegramBot().api.sendMessage(
     envelope.groupId.toString(),
     [
-      '🧧 Red Envelope',
+      title,
+      '恭喜发财，大吉大利 🎊',
       '',
-      `Total: ${formatMinor(envelope.totalMinor)} USDT`,
-      `Claims: ${envelope.totalSlots} · ${mode}`,
-      `Expires: ${envelope.expiresAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`,
+      `Total · 总额: ${formatMinor(envelope.totalMinor)} USDT`,
+      `Claims · 份数: ${envelope.totalSlots} · ${mode}`,
+      `Expires · 过期: ${envelope.expiresAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`,
       '',
-      'Tap below to claim. Each Telegram account can claim once.'
+      'Tap below to open it. Each Telegram account can claim once. · 点击下方按钮领取，每个账号限领一次。'
     ].join('\n'),
     { reply_markup: keyboard }
   );

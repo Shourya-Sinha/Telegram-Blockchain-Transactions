@@ -3,12 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type LedgerEntry, type Withdrawal } from '../api';
 import { configureBackButton, haptic } from '../telegram';
 import { ledgerTypeLabel, useT, withdrawalStatusLabel } from '../i18n';
+import { EnvelopeRow, formatMinor, isEnvelopeEntry } from './EnvelopeRow';
 
-function formatMinor(value: string | undefined): string {
-  if (!value) return '0.00';
-  const n = BigInt(value);
-  return `${n / 1_000_000n}.${(n % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
-}
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat(undefined, { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(date));
 }
@@ -17,8 +13,9 @@ function formatDate(date: string): string {
  * Full transaction history: every ledger movement (deposits, claims,
  * envelopes, withdrawals, fees, refunds) plus the status of each withdrawal
  * request. Reached from the wallet's History action and "See all".
+ * Red envelope movements render as WeChat-style envelope rows.
  */
-export function HistoryPanel({ testMode, onClose }: { testMode: boolean; onClose: () => void }) {
+export function HistoryPanel({ testMode, onClose, onOpenEnvelope }: { testMode: boolean; onClose: () => void; onOpenEnvelope?: (envelopeId: string) => void }) {
   const t = useT();
   const ledger = useQuery({ queryKey: ['ledger'], queryFn: () => api<LedgerEntry[]>('/api/ledger?limit=100'), retry: false });
   const withdrawals = useQuery({ queryKey: ['withdrawals'], queryFn: () => api<Withdrawal[]>('/api/withdrawals'), retry: false });
@@ -50,7 +47,7 @@ export function HistoryPanel({ testMode, onClose }: { testMode: boolean; onClose
       <section className="section">
         <div className="section-heading"><h2>{t('allActivity')}</h2><small className="history-count">{ledger.data?.length ?? 0}</small></div>
         {ledger.isLoading ? <div className="empty-activity"><p>{t('loadingActivity')}</p></div>
-          : ledger.data?.length ? <div className="activity-list">{ledger.data.map((entry) => (
+          : ledger.data?.length ? <div className="activity-list">{ledger.data.map((entry) => isEnvelopeEntry(entry) ? <EnvelopeRow key={entry.id} entry={entry} onOpen={onOpenEnvelope} /> : (
             <div className="activity-row" key={entry.id}>
               <span className={`activity-icon ${entry.direction === 'CREDIT' ? 'credit' : ''}`}>{entry.direction === 'CREDIT' ? '↓' : '↑'}</span>
               <span className="activity-info"><strong>{ledgerTypeLabel(t, entry.type)}</strong><small>{formatDate(entry.createdAt)}</small></span>

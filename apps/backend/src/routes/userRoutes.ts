@@ -105,7 +105,17 @@ userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (
 userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
   await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
-  res.json(jsonSafe(envelope));
+  // Flag which claim belongs to the viewer so the Mini App can reopen an
+  // already-opened envelope straight to its detail view, exactly like WeChat.
+  // Internal user ids are not exposed — only the display name of each claimer.
+  const claims = envelope.claims.map((claim: { id: string; userId: string; amountMinor: bigint; claimedAt: Date; user: { firstName: string; username: string | null } }) => ({
+    id: claim.id,
+    amountMinor: claim.amountMinor,
+    claimedAt: claim.claimedAt,
+    user: claim.user,
+    mine: claim.userId === req.telegramUser!.id
+  }));
+  res.json(jsonSafe({ ...envelope, claims }));
 }));
 userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
