@@ -21,12 +21,13 @@ const OPEN_ANIMATION_MS = 1250;
  *           appears below — exactly like WeChat's "opened" state.
  *
  * Reopening an envelope that this viewer already claimed (from history) skips
- * straight to the opened view.
+ * straight to the opened view. Sent/refund history rows also open in read-only
+ * detail mode so tapping any envelope history item shows its UI.
  */
-export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClose: () => void }) {
+export function ClaimModal({ envelopeId, viewOnly = false, onClose }: { envelopeId: string; viewOnly?: boolean; onClose: () => void }) {
   const t = useT();
   const client = useQueryClient();
-  const [phase, setPhase] = useState<Phase>('sealed');
+  const [phase, setPhase] = useState<Phase>(viewOnly ? 'done' : 'sealed');
   const [animDone, setAnimDone] = useState(false);
 
   const detail = useQuery({
@@ -46,16 +47,21 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
   });
 
   const myClaim = detail.data?.claims.find((claim) => claim.mine);
+  const detailUnavailable = detail.isError;
+  const envelopeClosed = Boolean(detail.data && (detail.data.status !== 'ACTIVE' || detail.data.remainingSlots <= 0));
 
-  // Already opened by this viewer (arrived via a history row): show the
-  // opened detail view immediately, no seal to tap.
+  // Already opened by this viewer (arrived via a history row), read-only
+  // history details, or a closed envelope should show the opened detail view
+  // immediately, with no active seal to tap.
   useEffect(() => {
-    if (phase === 'sealed' && myClaim && !mutation.isPending) setPhase('done');
-  }, [phase, myClaim, mutation.isPending]);
+    if (phase === 'sealed' && (myClaim || viewOnly || envelopeClosed || detailUnavailable) && !mutation.isPending) setPhase('done');
+  }, [phase, myClaim, viewOnly, envelopeClosed, detailUnavailable, mutation.isPending]);
 
   const openEnvelope = () => {
     if (phase !== 'sealed' || mutation.isPending) return;
+    if (viewOnly || envelopeClosed || detailUnavailable) { setPhase('done'); return; }
     haptic('medium');
+    setAnimDone(false);
     setPhase('opening');
     mutation.mutate();
     window.setTimeout(() => setAnimDone(true), OPEN_ANIMATION_MS);
@@ -69,6 +75,7 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
 
   const claimed = mutation.isSuccess ? mutation.data.claim.amountMinor : myClaim?.amountMinor;
   const error = mutation.isError ? mutation.error : undefined;
+  const detailError = detail.isError ? detail.error : undefined;
   const errorCode = error instanceof ApiError ? error.code : undefined;
   const missMessage = errorCode === 'ALREADY_CLAIMED' ? t('alreadyClaimedNote')
     : errorCode === 'ENVELOPE_CLOSED' ? t('envelopeFullyClaimed')
@@ -78,6 +85,20 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
   const senderName = detail.data?.sender.firstName?.trim();
   const senderTitle = senderName ? t('redEnvelopeFrom', { name: senderName }) : t('redEnvelopeGeneric');
   const claims = detail.data?.claims ?? [];
+  const claimedCount = detail.data ? detail.data.totalSlots - detail.data.remainingSlots : claims.length;
+  const statusLabel = detail.data?.status === 'ACTIVE' ? t('envelopeStatusActive')
+    : detail.data?.status === 'COMPLETED' ? t('envelopeStatusCompleted')
+      : detail.data?.status === 'EXPIRED' ? t('envelopeStatusExpired')
+        : detail.data?.status === 'REFUNDED' ? t('envelopeStatusRefunded')
+          : t('loadingActivity');
+  const detailsMessage = detail.data
+    ? `${t('claimsProgress', { claimed: claimedCount, total: detail.data.totalSlots })} · ${statusLabel}`
+    : detailError instanceof Error && detailError.message
+      ? detailError.message
+        : detailUnavailable
+          ? t('envelopeDetailsUnavailable')
+          : t('loadingActivity');
+  const canTapToClaim = phase === 'sealed' && !viewOnly && !envelopeClosed && !detailUnavailable;
 
   return <div className="hongbao-overlay" role="dialog" aria-modal="true" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <button className="hb-close" onClick={() => { haptic(); onClose(); }} aria-label={t('done')}>×</button>
@@ -90,8 +111,8 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
     <div
       className={`hb-envelope phase-${phase}`}
       onClick={openEnvelope}
-      role={phase === 'sealed' ? 'button' : undefined}
-      tabIndex={phase === 'sealed' ? 0 : undefined}
+      role={canTapToClaim ? 'button' : undefined}
+      tabIndex={canTapToClaim ? 0 : undefined}
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEnvelope(); } }}
     >
       <div className="hb-body">
@@ -100,11 +121,11 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
             <span className="hb-reveal-label">{t('claimAdded')}</span>
             <div className="hb-amount">+{formatMinor(claimed)} <small>USDT</small></div>
           </>}
-          {phase === 'done' && !claimed && <div className="hb-missed">{missMessage}</div>}
+          {phase === 'done' && !claimed && <div className="hb-missed">{viewOnly || envelopeClosed || detailUnavailable ? detailsMessage : missMessage}</div>}
         </div>
         <div className="hb-flap">
           <div className="hb-flap-shape" />
-          {phase === 'sealed' && <button className="hb-seal" onClick={openEnvelope} aria-label={t('tapToOpen')}><span lang="zh">福</span></button>}
+          {canTapToClaim && <button className="hb-seal" onClick={(event) => { event.stopPropagation(); openEnvelope(); }} aria-label={t('tapToOpen')}><span lang="zh">福</span></button>}
         </div>
         {phase === 'opening' && <div className="hb-coins" aria-hidden="true">{Array.from({ length: 9 }).map((_, index) => <span key={index} />)}</div>}
       </div>
@@ -114,6 +135,7 @@ export function ClaimModal({ envelopeId, onClose }: { envelopeId: string; onClos
       {phase === 'sealed' && t('tapToOpen')}
       {phase === 'opening' && t('claimOpening')}
       {phase === 'done' && claimed && t('blessing')}
+      {phase === 'done' && !claimed && (viewOnly || envelopeClosed || detailUnavailable) && t('envelopeHistoryHint')}
     </p>
 
     {phase === 'done' && claims.length > 0 && <div className="hb-claims">

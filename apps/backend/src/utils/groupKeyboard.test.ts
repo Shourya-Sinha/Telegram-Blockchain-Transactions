@@ -16,9 +16,11 @@ const read = (relativePath: string): string => readFileSync(resolve(process.cwd(
 test('envelope messages posted to groups never use private-only web_app buttons', () => {
   const source = read('src/services/telegramService.ts');
   const body = source.slice(source.indexOf('export async function publishEnvelopeMessage'));
+  const keyboardHelper = source.slice(source.indexOf('function envelopeGroupKeyboard'));
   assert.equal(body.includes('.webApp('), false, 'publishEnvelopeMessage must not attach a web_app button (groups reject it)');
-  assert.equal(body.includes('.url('), true, 'publishEnvelopeMessage should use a t.me deep-link url button');
-  assert.equal(body.includes('walletDeepLink()'), true);
+  assert.equal(body.includes('envelopeGroupKeyboard(envelope.id)'), true, 'publishEnvelopeMessage should use the group-safe envelope keyboard');
+  assert.equal(keyboardHelper.includes('envelopeDeepLink(envelopeId)'), true, 'the claim button should deep-link to the Mini App envelope screen');
+  assert.equal(keyboardHelper.includes('keyboard.url(label, claimLink)'), true, 'the group claim button should be a URL, not a private web_app button');
 });
 
 test('chatAppKeyboard picks web_app for private chats and a deep link for groups', () => {
@@ -27,16 +29,18 @@ test('chatAppKeyboard picks web_app for private chats and a deep link for groups
   assert.match(source, /chatType === 'group' \|\| chatType === 'supergroup'/);
   // The group branch must not fall through to the web_app keyboard.
   const groupBranch = source.slice(source.indexOf('export function chatAppKeyboard'));
-  assert.match(groupBranch, /return deepLink \? new InlineKeyboard\(\)\.url\(label, deepLink\) : undefined;/);
+  assert.match(groupBranch, /return groupDeepLink \? new InlineKeyboard\(\)\.url\(label, groupDeepLink\) : undefined;/);
 });
 
-test('the claim keyboard edit on a group envelope message uses a deep link, not web_app', () => {
+test('legacy claim callbacks open the Mini App envelope screen instead of claiming in the bot', () => {
   const source = read('src/bot/bot.ts');
   const claimHandler = source.slice(source.indexOf('bot.callbackQuery(/^[0-9a-f]{8}'));
-  assert.equal(claimHandler.includes('.webApp('), false, 'the envelope edit happens on a group message; web_app would be rejected');
-  assert.equal(claimHandler.includes('walletDeepLink()'), true);
+  assert.equal(claimHandler.includes('.webApp('), false, 'group callbacks must not attach a web_app button to the group message');
+  assert.equal(claimHandler.includes('claimEnvelope('), false, 'the Telegram callback should not claim directly; the Mini App does that after the opening animation');
+  assert.equal(claimHandler.includes('envelopeDeepLink(envelopeId)'), true);
+  assert.equal(claimHandler.includes('envelopeAppUrl(envelopeId)'), true);
   // Every command that can be typed inside a group must pick its keyboard by chat type.
-  assert.match(source, /chatAppKeyboard\(texts\.(walletGroupButton|historyButton|walletDetailsButton), ctx\.chat(\?)?\.(type|type)\)/);
+  assert.match(source, /chatAppKeyboard\(texts\.(walletGroupButton|historyButton|walletDetailsButton), ctx\.chat(\?)?\.(type|type)/);
 });
 
 test('the bot installs the group button guard on every outgoing Telegram call', () => {

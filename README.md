@@ -77,7 +77,7 @@ The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend
 2. Set a long random `TELEGRAM_WEBHOOK_SECRET`.
 3. Expose the backend over HTTPS and set `TELEGRAM_WEBHOOK_URL=https://your-domain/telegram/webhook`.
 4. The backend registers a public HTTPS webhook on startup and checks `X-Telegram-Bot-Api-Secret-Token` on every webhook request. For local development (`localhost`, `127.0.0.1`, or a missing webhook URL), it automatically removes the unreachable webhook and uses Telegram long polling instead.
-5. Configure the bot menu or `/start` to open the Mini App URL (`PUBLIC_APP_URL`). On startup the backend also registers a persistent `🧧 Wallet` chat-menu button and the full bot command list automatically (the URL must be HTTPS, or `localhost` during development).
+5. Configure the bot menu or `/start` to open the Mini App URL (`PUBLIC_APP_URL`). On startup the backend also registers a persistent `🧧 Wallet` chat-menu button and the full bot command list automatically (the URL must be HTTPS, or `localhost` during development). To make group red-envelope buttons open the Mini App envelope screen directly, create a BotFather Mini App short name and set `TELEGRAM_MINI_APP_SHORT_NAME`; otherwise the group button opens the bot private chat first, where the user taps the private Mini App button.
 6. Add the bot to each destination group, promote it so it can send/edit messages and verify membership, then run `/registergroup` in that group.
 7. Run `/myid` from the funded treasury Telegram account and set that number as `RED_ENVELOPE_TREASURY_TELEGRAM_ID` to enable admin-created envelopes.
 

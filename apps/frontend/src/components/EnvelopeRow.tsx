@@ -3,6 +3,8 @@ import { haptic } from '../telegram';
 import { useT } from '../i18n';
 import { EnvelopeGlyph } from './EnvelopeGlyph';
 
+export type OpenEnvelopeHandler = (envelopeId: string, options?: { viewOnly?: boolean }) => void;
+
 export function formatMinor(value: string | bigint | undefined): string {
   if (!value) return '0.00';
   const n = BigInt(value);
@@ -27,12 +29,15 @@ export function isEnvelopeEntry(entry: Pick<LedgerEntry, 'type' | 'referenceType
 
 /**
  * WeChat-style envelope row used by Recent activity and the History panel.
+ * Every envelope row opens its envelope UI. Claimed/refunded/finished rows open
+ * as read-only details; an active sent row opens sealed so the current user can
+ * tap the seal and claim if they are eligible.
  *
  * - claimed (CLAIM): light-red *opened* envelope, "From {sender}", +amount
  * - sent (TRANSFER): bright-red *sealed* envelope, -amount, claimed progress
  * - expired (REFUND): dimmed sealed envelope, "Expired · refunded"
  */
-export function EnvelopeRow({ entry, onOpen }: { entry: LedgerEntry; onOpen?: (envelopeId: string) => void }) {
+export function EnvelopeRow({ entry, onOpen }: { entry: LedgerEntry; onOpen?: OpenEnvelopeHandler }) {
   const t = useT();
   const meta = entry.envelope;
   const isClaim = entry.type === 'CLAIM';
@@ -64,8 +69,9 @@ export function EnvelopeRow({ entry, onOpen }: { entry: LedgerEntry; onOpen?: (e
     </span>
   </>;
 
-  if (isClaim && onOpen && entry.referenceId) {
-    return <button className={`envelope-row ${variant}`} onClick={() => { haptic(); onOpen(entry.referenceId!); }}>{content}</button>;
+  if (onOpen && entry.referenceId) {
+    const readOnly = isClaim || isRefund || (meta?.status !== undefined && meta.status !== 'ACTIVE');
+    return <button className={`envelope-row ${variant}`} onClick={() => { haptic(); onOpen(entry.referenceId!, { viewOnly: readOnly }); }}>{content}</button>;
   }
   return <div className={`envelope-row ${variant}`}>{content}</div>;
 }

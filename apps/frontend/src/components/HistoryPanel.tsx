@@ -1,9 +1,8 @@
-import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type LedgerEntry, type Withdrawal } from '../api';
-import { configureBackButton, haptic } from '../telegram';
+import { haptic } from '../telegram';
 import { ledgerTypeLabel, useT, withdrawalStatusLabel } from '../i18n';
-import { EnvelopeRow, formatMinor, isEnvelopeEntry } from './EnvelopeRow';
+import { EnvelopeRow, formatMinor, isEnvelopeEntry, type OpenEnvelopeHandler } from './EnvelopeRow';
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat(undefined, { year: '2-digit', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(date));
@@ -15,11 +14,10 @@ function formatDate(date: string): string {
  * request. Reached from the wallet's History action and "See all".
  * Red envelope movements render as WeChat-style envelope rows.
  */
-export function HistoryPanel({ testMode, onClose, onOpenEnvelope }: { testMode: boolean; onClose: () => void; onOpenEnvelope?: (envelopeId: string) => void }) {
+export function HistoryPanel({ testMode, onClose, onOpenEnvelope }: { testMode: boolean; onClose: () => void; onOpenEnvelope?: OpenEnvelopeHandler }) {
   const t = useT();
   const ledger = useQuery({ queryKey: ['ledger'], queryFn: () => api<LedgerEntry[]>('/api/ledger?limit=100'), retry: false });
   const withdrawals = useQuery({ queryKey: ['withdrawals'], queryFn: () => api<Withdrawal[]>('/api/withdrawals'), retry: false });
-  useEffect(() => configureBackButton(onClose, true), [onClose]);
   return (
     <section className="history-panel">
       <header className="history-header">
