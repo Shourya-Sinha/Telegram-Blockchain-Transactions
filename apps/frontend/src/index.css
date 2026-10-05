@@ -49,9 +49,27 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
    Full-bleed deep-red overlay; a bright red envelope drops in with the
    sender's name and blessing; a pulsing gold seal opens it; the flap lifts
    in 3D, coins fly out, and the pocket fades to light red with the amount. */
-.hongbao-overlay { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 13px; padding: calc(24px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))) 18px calc(16px + max(env(safe-area-inset-bottom, 0px), var(--app-safe-bottom))) 18px; overflow-y: auto; background: radial-gradient(130% 90% at 50% -10%, #e03c40 0%, #c13038 38%, #8a2029 78%, #5c151f 100%); animation: fade-in .3s ease; }
-.hb-close { position: absolute; top: calc(12px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))); right: calc(12px + var(--app-safe-right)); width: 32px; height: 32px; border-radius: 50%; color: rgba(255, 235, 220, .85); background: rgba(0, 0, 0, .18); font-size: 20px; line-height: 20px; }
-.hb-sender { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 2vh; color: #ffe4d2; text-align: center; }
+/* The overlay is a three-part column — fixed top bar, scrolling middle, fixed
+   footer — so the back arrow, × and Done button stay reachable no matter how
+   long the claim list gets. */
+.hongbao-overlay { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; overflow: hidden; background: radial-gradient(130% 90% at 50% -10%, #e03c40 0%, #c13038 38%, #8a2029 78%, #5c151f 100%); animation: fade-in .3s ease; }
+.hb-topbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: calc(10px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))) calc(12px + var(--app-safe-right)) 10px calc(12px + var(--app-safe-left)); border-bottom: 1px solid rgba(255, 210, 180, .14); background: rgba(92, 21, 31, .32); }
+.hb-topbar-title { flex: 1; overflow: hidden; color: #ffe4d2; font-size: 13px; font-weight: 700; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.hb-back { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: 50%; color: rgba(255, 235, 220, .9); background: rgba(0, 0, 0, .18); font-size: 24px; line-height: 22px; }
+.hb-close { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 50%; color: rgba(255, 235, 220, .85); background: rgba(0, 0, 0, .18); font-size: 20px; line-height: 20px; }
+.hb-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 13px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 16px 18px 20px; }
+.hb-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px calc(16px + var(--app-safe-right)) calc(12px + max(env(safe-area-inset-bottom, 0px), var(--app-safe-bottom))) calc(16px + var(--app-safe-left)); border-top: 1px solid rgba(255, 210, 180, .14); background: rgba(92, 21, 31, .32); }
+.hb-retry { padding: 11px 24px; border-radius: 999px; color: #7a2a18; background: linear-gradient(180deg, #ffd98f, #f2b451); font-size: 13px; font-weight: 750; }
+.hb-retry:disabled { opacity: .6; }
+.hb-error { display: flex; flex-direction: column; gap: 5px; width: min(100%, 340px); padding: 11px 13px; border: 1px solid rgba(255, 196, 180, .32); border-radius: 14px; color: #ffe2d6; background: rgba(78, 10, 18, .45); font-size: 12px; line-height: 1.45; }
+.hb-error strong { font-size: 12px; }
+.hb-inline-button { align-self: flex-start; margin-top: 3px; padding: 5px 11px; border-radius: 999px; color: #ffe9d9; background: rgba(255, 220, 190, .16); font-size: 11px; font-weight: 700; }
+.hb-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(100%, 340px); }
+.hb-meta div { display: flex; flex-direction: column; gap: 3px; padding: 9px 11px; border: 1px solid rgba(255, 210, 180, .16); border-radius: 13px; background: rgba(64, 8, 16, .3); }
+.hb-meta span { color: rgba(255, 224, 200, .62); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.hb-meta strong { color: #ffe9d9; font-size: 13px; }
+.hb-details-link { width: min(100%, 340px); padding: 10px; border-radius: 12px; color: #ffe9d9; background: rgba(255, 220, 190, .12); font-size: 12px; font-weight: 650; }
+.hb-sender { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #ffe4d2; text-align: center; }
 .hb-sender-avatar { display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid rgba(255, 222, 186, .4); border-radius: 50%; color: #ffb37e; background: rgba(0, 0, 0, .16); font-size: 20px; font-weight: 750; }
 .hb-sender strong { font-size: 17px; letter-spacing: -.01em; }
 .hb-blessing { margin: 0; color: rgba(255, 224, 200, .82); font-size: 12px; }
@@ -93,7 +111,7 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 .hb-claim-name em { margin-left: 6px; padding: 2px 6px; border-radius: 6px; color: #ffd9a8; background: rgba(255, 200, 130, .16); font-size: 9px; font-style: normal; font-weight: 750; }
 .hb-claim-time { color: rgba(255, 224, 200, .55); font-size: 10px; }
 .hb-claim-amount { color: #ffd9a8; font-size: 12px; font-weight: 700; }
-.hb-done { flex: 0 0 auto; margin-top: auto; padding: 11px 30px; border: 1px solid rgba(255, 225, 200, .3); border-radius: 999px; color: #ffe9d9; background: rgba(255, 220, 190, .12); font-size: 13px; font-weight: 700; transition: transform .2s; }
+.hb-done { flex: 0 0 auto; padding: 11px 30px; border: 1px solid rgba(255, 225, 200, .3); border-radius: 999px; color: #ffe9d9; background: rgba(255, 220, 190, .12); font-size: 13px; font-weight: 700; transition: transform .2s; }
 .hb-done:active { transform: scale(.97); }.build-indicator { position: absolute; right: calc(9px + var(--app-safe-right)); bottom: calc(78px + var(--app-safe-bottom)); z-index: 2; padding: 4px 7px; border-radius: 6px; color: #536a83; background: rgba(8, 17, 30, .65); font-size: 8px; opacity: .75; }
 @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } } @keyframes slide-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } } @keyframes sheet-rise { from { transform: translateY(100%); } to { transform: translateY(0); } } @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } } @keyframes envelope-drop { 0% { opacity: 0; transform: translateY(-26px) scale(.92); } 60% { opacity: 1; } 100% { opacity: 1; transform: translateY(0) scale(1); } } @keyframes hb-flap-open { from { transform: rotateX(0); } to { transform: rotateX(-167deg); } } @keyframes seal-pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 10px 24px rgba(88, 12, 20, .45), 0 0 0 0 rgba(255, 214, 130, .5), inset 0 2px 5px rgba(255, 255, 255, .6), inset 0 -3px 6px rgba(140, 70, 10, .35); } 50% { transform: translate(-50%, -50%) scale(1.05); box-shadow: 0 12px 28px rgba(88, 12, 20, .5), 0 0 0 14px rgba(255, 214, 130, 0), inset 0 2px 5px rgba(255, 255, 255, .6), inset 0 -3px 6px rgba(140, 70, 10, .35); } } @keyframes seal-burst { from { transform: translate(-50%, -50%) scale(1) rotate(0); opacity: 1; } to { transform: translate(-50%, -50%) scale(1.6) rotate(24deg); opacity: 0; } } @keyframes coin-fly { 0% { opacity: 0; transform: translate(0, 0) scale(.4); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx, -40px), var(--dy, -80px)) scale(1); } } @keyframes reveal-up { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .app-shell, .modal-card, .screen { animation: none; } .hongbao-overlay, .hb-envelope, .hb-flap, .hb-seal, .hb-coins span, .hb-amount, .hb-missed { animation: none !important; } .phase-done .hb-flap { transform: rotateX(-167deg); } }
@@ -101,13 +119,54 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 .field-label select { width: 100%; padding: 12px 13px; border: 1px solid #293c54; border-radius: 11px; outline: none; color: #f3f7fc; background: #0a1625; font-size: 13px; }
 .field-label select:focus { border-color: #5da7de; box-shadow: 0 0 0 3px rgba(72, 153, 214, .1); }
 
+/* ── Transaction detail sheet ──────────────────────────────────────────────
+   Opened by tapping any history or recent-activity row. Header and footer are
+   outside the scroll area so the back arrow and Close button are always
+   on screen, and it sits above the modals but below the envelope overlay. */
+.detail-overlay { position: absolute; z-index: 25; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding: calc(10px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))) calc(10px + var(--app-safe-right)) calc(10px + max(env(safe-area-inset-bottom, 0px), var(--app-safe-bottom))) calc(10px + var(--app-safe-left)); background: rgba(1, 7, 14, .72); backdrop-filter: blur(7px); animation: fade-in .22s ease; }
+.detail-sheet { display: flex; flex-direction: column; width: min(100%, 520px); max-height: 100%; overflow: hidden; border: 1px solid #2b4058; border-radius: 22px; background: #0d1b2c; box-shadow: 0 -10px 50px rgba(0, 0, 0, .35); animation: slide-up .26s ease; }
+.detail-header { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #1b2d43; }
+.detail-header h2 { flex: 1; margin: 0; overflow: hidden; font-size: 16px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.detail-back { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; color: #9cafc4; background: #182b40; font-size: 24px; line-height: 22px; }
+.detail-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 16px 16px 8px; }
+.detail-amount-card { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 18px 14px; border: 1px solid #1d3047; border-radius: 18px; background: rgba(9, 20, 34, .72); }
+.detail-amount-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: #1c2b3e; color: #9cb1c9; font-size: 20px; }
+.detail-amount-icon.credit { color: #62dba7; background: rgba(54, 190, 131, .12); }
+.detail-amount { font-size: 28px; font-weight: 740; letter-spacing: -.04em; }
+.detail-amount small { color: #8ea3bb; font-size: 13px; font-weight: 650; }
+.detail-amount-sub { color: #7d90a7; font-size: 11px; }
+.detail-rows { margin-top: 14px; border: 1px solid #18283b; border-radius: 16px; background: rgba(13, 24, 39, .74); overflow: hidden; }
+.detail-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; }
+.detail-row + .detail-row { border-top: 1px solid #172638; }
+.detail-row-label { flex: 0 0 auto; color: #76889f; font-size: 11px; }
+.detail-row-value { display: flex; align-items: center; gap: 8px; min-width: 0; color: #d3dde9; font-size: 12px; text-align: right; word-break: break-word; }
+.detail-copy { flex: 0 0 auto; padding: 4px 8px; border-radius: 7px; color: #78c3f3; background: rgba(83, 158, 218, .12); font-size: 10px; }
+.detail-note { margin: 12px 13px; color: #76889f; font-size: 11px; line-height: 1.5; }
+.detail-primary { margin-top: 14px; }
+.detail-footer { flex: 0 0 auto; padding: 10px 16px 14px; border-top: 1px solid #1b2d43; }
+.detail-footer .detail-close { margin-top: 0; }
+.row-chevron { flex: 0 0 auto; margin-left: 9px; color: #52657d; font-size: 17px; line-height: 1; }
+.history-hint { display: block; margin-top: 3px; color: #6d7f96; font-size: 10px; }
+.status-pending, .status-confirmed { color: #78bcf1; background: rgba(75, 156, 224, .13); }
+.status-active { color: #eecf85; background: rgba(224, 173, 75, .12); }
+.status-refunded, .status-expired { color: #b9c8d9; background: rgba(120, 145, 175, .14); }
+
+/* Crash fallback: a render error must never leave a frozen screen. */
+.crash-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; padding: 28px 24px; text-align: center; }
+.crash-icon { font-size: 30px; }
+.crash-screen h2 { margin: 0; font-size: 18px; }
+.crash-screen p { margin: 0; max-width: 300px; color: #8a9cb2; font-size: 12px; line-height: 1.55; }
+.crash-screen code { max-width: 100%; overflow: hidden; padding: 7px 10px; border-radius: 9px; color: #ffaaa8; background: rgba(231, 94, 94, .1); font-size: 10px; text-overflow: ellipsis; }
+.crash-screen .primary-button { max-width: 240px; }
+
 /* Full history panel (withdrawals + ledger), opened from the Wallet tab. */
 .history-panel { position: relative; z-index: 1; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: calc(14px + max(var(--app-safe-top), env(safe-area-inset-top, 0px))) calc(19px + max(var(--app-safe-right), env(safe-area-inset-right, 0px))) 26px calc(19px + max(var(--app-safe-left), env(safe-area-inset-left, 0px))); animation: appear .35s ease; }
 .history-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .history-header h2 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
 .history-warning { margin: 0 0 6px; }
 .history-count { color: #6d7f96; font-size: 11px; }
-.withdrawal-row { display: flex; align-items: center; width: 100%; padding: 13px 14px; }
+.withdrawal-row { display: flex; align-items: center; width: 100%; padding: 13px 14px; text-align: left; background: transparent; }
+.withdrawal-row:active, .activity-row:active { background-color: rgba(90, 156, 227, .08); }
 .withdrawal-row + .withdrawal-row, .withdrawal-row + .activity-row, .activity-row + .withdrawal-row { border-top: 1px solid #172638; }
 .activity-icon.withdraw { color: #9bc7f5; background: rgba(90, 156, 227, .15); }
 .withdrawal-address { overflow: hidden; max-width: 150px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }

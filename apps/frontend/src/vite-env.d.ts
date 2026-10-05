@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
 declare global {
+  /** Build stamp injected by vite.config.ts; rendered in the corner indicator. */
+  const __APP_BUILD__: string;
+
   type TelegramSafeAreaInset = { top: number; right: number; bottom: number; left: number };
   type TelegramWebAppEvent = 'viewportChanged' | 'safeAreaChanged' | 'contentSafeAreaChanged' | 'fullscreenChanged' | 'fullscreenFailed' | 'themeChanged';
 

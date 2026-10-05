@@ -164,6 +164,26 @@ In `FUNDS_MODE=test` the withdrawal button is disabled unless you set `TEST_WITH
 4. Put TLS in front of ports 5173 (TMA), 5174 (admin) and 4000 (webhook/API), or route both static apps and `/api` through a single domain. Set `PUBLIC_APP_URL`, `TELEGRAM_WEBHOOK_URL`, and `CORS_ORIGINS` to HTTPS origins.
 5. Back up PostgreSQL and Redis persistence, alert on `alert:hot-wallet-cap`, worker failures, pending withdrawals, failed deposits and reserve coverage. Rotate secrets and restrict admin access at the network layer.
 
+### Making sure Telegram actually runs the build you just deployed
+
+Telegram's WebView caches aggressively. If the Mini App still behaves like the
+previous release — for example history rows that do not react to a tap — the
+browser inside Telegram is almost certainly still booting the old JavaScript
+bundle. The deployment now prevents and diagnoses that:
+
+- `nginx` serves `index.html` (and every SPA route) with `Cache-Control: no-store`, while the fingerprinted files in `/assets/` are cached for a year. A new deploy therefore always loads its own bundle.
+- Every build is stamped (`APP_BUILD_ID`, otherwise the UTC build time as `yymmddhhmm`) and the stamp is printed in the corner of the Mini App next to “Custodial ledger online”. Compare it with your deploy to confirm which bundle is live.
+
+```bash
+git pull
+docker compose build --no-cache frontend backend
+docker compose up -d frontend backend
+docker compose exec frontend sh -c 'grep -o "assets/index-[^\"]*\.js" /usr/share/nginx/html/index.html'
+```
+
+Then reopen the Mini App (close it first; on Telegram Desktop use ⋮ → *Reload
+page*) and check that the corner stamp changed.
+
 ## Important API surface
 
 TMA routes use `X-Telegram-Init-Data`:

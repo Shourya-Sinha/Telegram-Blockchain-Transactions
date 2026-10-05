@@ -48,7 +48,9 @@ When a group is registered (`/registergroup`) and a member taps **Claim red enve
 - The panel has two sections:
   - **Withdrawals** — every withdrawal request with amount, fee, destination address, transaction hash (real mode), and a status chip: `Queued → Processing → Broadcast → Confirming → Completed` (or `Failed` / `Rejected`). Test-mode withdrawals are tagged `Completed · simulated`.
   - **All activity** — the complete ledger: deposits, claims, envelopes sent, withdrawals, fees and refunds.
-- Telegram's **← Back button** closes the panel.
+- **Every row is tappable.** A deposit, withdrawal or fee row opens a **transaction detail sheet** with the full record: amount, direction, exact date and time, status, balance after the movement, network, destination or source address, transaction hash, confirmations and the reference id (addresses and hashes copy with one tap). Red envelope rows open the envelope screen instead — sealed and claimable if the envelope is still open, otherwise the opened view with the envelope total, shares claimed, distribution mode, status, your share and the full claim list. From there, *Transaction details ›* shows the matching ledger record.
+- Telegram's **← Back button** closes one layer at a time (envelope → transaction details → history → wallet); the on-screen back arrow, the `×`, the Close/Done buttons and the `Esc` key do the same. No screen in the Mini App can trap the user.
+- If an envelope cannot be opened (no network, rate limit, group membership still being verified, server error), the envelope stays sealed and shows the reason with a **Try again** button. Only *already claimed*, *fully claimed*, *expired* and *not found* are final — those switch straight to the detail view.
 
 **From the bot chat (quick check):**
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api } from './api';
+import { ApiError, api } from './api';
 
 /**
  * Mini App language: English (en 🇬🇧) and Simplified Chinese (zh 🇨🇳).
@@ -204,7 +204,60 @@ const en = {
   partnerNetwork: 'Partner network',
   partnerText: 'Explore verified integrations',
   soon: 'Soon',
-  languageLabel: 'Language'
+  languageLabel: 'Language',
+  back: 'Back',
+  close: 'Close',
+  tryAgain: 'Try again',
+  retry: 'Retry',
+  reload: 'Reload',
+  transactionDetails: 'Transaction details',
+  historyDetailsHint: 'Tap any entry to see its full details',
+  dateTimeLabel: 'Date & time',
+  typeLabel: 'Type',
+  directionLabel: 'Direction',
+  directionCredit: 'Received',
+  directionDebit: 'Sent',
+  statusLabel: 'Status',
+  balanceAfterLabel: 'Balance after',
+  referenceLabel: 'Reference',
+  networkLabel: 'Network',
+  destinationLabel: 'Destination address',
+  fromAddressLabel: 'From address',
+  txHashLabel: 'Transaction hash',
+  confirmationsLabel: 'Confirmations',
+  completedAtLabel: 'Completed',
+  requestedAtLabel: 'Requested',
+  feeOnlyLabel: 'Network fee',
+  netReceivedLabel: 'You received',
+  senderLabel: 'Sender',
+  distributionLabel: 'Distribution',
+  sharesClaimedLabel: 'Shares claimed',
+  envelopeStatusHeading: 'Envelope status',
+  envelopeTotalLabel: 'Envelope total',
+  yourShareLabel: 'Your share',
+  createdAtLabel: 'Created',
+  expiresAtLabel: 'Expires',
+  expiredAtLabel: 'Expired',
+  viewEnvelope: 'View red envelope',
+  openEnvelopeAction: 'Open red envelope',
+  envelopeDetailsTitle: 'Red envelope',
+  withdrawalDetailsTitle: 'Withdrawal',
+  depositDetailsTitle: 'Deposit',
+  noExtraDetails: 'No further details were recorded for this entry.',
+  loadingDetails: 'Loading details…',
+  detailsOpenHint: 'Everything recorded for this movement',
+  loadingEnvelope: 'Loading envelope…',
+  envelopeLoadFailed: 'This envelope could not be loaded.',
+  envelopeTapAgain: 'Tap the seal to try again',
+  claimFailedTitle: 'Could not open the envelope',
+  errorMembershipRequired: 'Join the Telegram group first, then open the envelope again.',
+  errorMembershipUnverified: 'Telegram could not confirm your group membership. Ask an admin to make the bot a group administrator, then try again.',
+  errorRateLimited: 'Too many attempts. Wait a few seconds and try again.',
+  errorNetwork: 'Network unavailable. Check your connection and try again.',
+  errorGeneric: 'Something went wrong. Please try again.',
+  errorBoundaryTitle: 'The wallet hit an unexpected error',
+  errorBoundaryText: 'Nothing was lost — your balance and claims are stored on the server. Reload to continue.',
+  copyAddress: 'Copy'
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -369,7 +422,60 @@ const zh: Record<TranslationKey, string> = {
   partnerNetwork: '合作伙伴网络',
   partnerText: '探索认证集成',
   soon: '即将推出',
-  languageLabel: '语言'
+  languageLabel: '语言',
+  back: '返回',
+  close: '关闭',
+  tryAgain: '重试',
+  retry: '重新加载',
+  reload: '重新加载',
+  transactionDetails: '交易详情',
+  historyDetailsHint: '点按任意记录查看完整详情',
+  dateTimeLabel: '时间',
+  typeLabel: '类型',
+  directionLabel: '方向',
+  directionCredit: '收入',
+  directionDebit: '支出',
+  statusLabel: '状态',
+  balanceAfterLabel: '交易后余额',
+  referenceLabel: '关联编号',
+  networkLabel: '网络',
+  destinationLabel: '提现地址',
+  fromAddressLabel: '来源地址',
+  txHashLabel: '交易哈希',
+  confirmationsLabel: '确认数',
+  completedAtLabel: '完成时间',
+  requestedAtLabel: '提交时间',
+  feeOnlyLabel: '网络手续费',
+  netReceivedLabel: '实际到账',
+  senderLabel: '发送者',
+  distributionLabel: '分配方式',
+  sharesClaimedLabel: '已领份数',
+  envelopeStatusHeading: '红包状态',
+  envelopeTotalLabel: '红包总额',
+  yourShareLabel: '您的份额',
+  createdAtLabel: '创建时间',
+  expiresAtLabel: '过期时间',
+  expiredAtLabel: '已过期',
+  viewEnvelope: '查看红包',
+  openEnvelopeAction: '打开红包',
+  envelopeDetailsTitle: '红包',
+  withdrawalDetailsTitle: '提现',
+  depositDetailsTitle: '充值',
+  noExtraDetails: '该记录没有更多详情。',
+  loadingDetails: '正在加载详情…',
+  detailsOpenHint: '这笔资金变动的全部记录',
+  loadingEnvelope: '正在加载红包…',
+  envelopeLoadFailed: '无法加载此红包。',
+  envelopeTapAgain: '点击封印重试',
+  claimFailedTitle: '红包打开失败',
+  errorMembershipRequired: '请先加入该 Telegram 群组，然后重新打开红包。',
+  errorMembershipUnverified: 'Telegram 无法确认您的群成员身份。请让管理员将机器人设为群管理员后重试。',
+  errorRateLimited: '操作过于频繁，请稍候几秒后重试。',
+  errorNetwork: '网络不可用，请检查连接后重试。',
+  errorGeneric: '出现问题，请重试。',
+  errorBoundaryTitle: '钱包出现意外错误',
+  errorBoundaryText: '数据不会丢失 — 余额与领取记录都保存在服务器。重新加载即可继续。',
+  copyAddress: '复制'
 };
 
 const dictionaries: Record<Lang, Record<TranslationKey, string>> = { en, zh };
@@ -408,6 +514,32 @@ export function withdrawalStatusLabel(t: Translate, status: string): string {
     REJECTED: 'statusRejected'
   };
   return map[status] ? t(map[status]) : status;
+}
+
+export function depositStatusLabel(t: Translate, status: string): string {
+  const map: Record<string, TranslationKey> = { PENDING: 'statusConfirming', CONFIRMED: 'statusCompleted', FAILED: 'statusFailed' };
+  return map[status] ? t(map[status]) : status;
+}
+
+/**
+ * Turns a backend error code into a sentence the user can act on. Anything
+ * unmapped falls back to the server's own message so nothing is swallowed.
+ */
+export function apiErrorMessage(t: Translate, error: unknown): string {
+  const code = error instanceof ApiError ? error.code : undefined;
+  const map: Record<string, TranslationKey> = {
+    ALREADY_CLAIMED: 'alreadyClaimedNote',
+    ENVELOPE_CLOSED: 'envelopeFullyClaimed',
+    ENVELOPE_EXPIRED: 'envelopeExpiredMsg',
+    ENVELOPE_NOT_FOUND: 'envelopeGone',
+    GROUP_MEMBERSHIP_REQUIRED: 'errorMembershipRequired',
+    MEMBERSHIP_UNVERIFIED: 'errorMembershipUnverified',
+    RATE_LIMITED: 'errorRateLimited',
+    NETWORK_ERROR: 'errorNetwork'
+  };
+  if (code && map[code]) return t(map[code]);
+  if (error instanceof Error && error.message) return error.message;
+  return t('errorGeneric');
 }
 
 export function greetingKey(): TranslationKey {
