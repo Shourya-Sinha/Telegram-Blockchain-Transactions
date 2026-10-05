@@ -127,7 +127,7 @@ export default function App() {
         onClose={() => setClaimLaunch(undefined)}
         onShowLedgerDetails={envelopeLedgerEntry ? () => { setDetail({ kind: 'ledger', entry: envelopeLedgerEntry }); setClaimLaunch(undefined); } : undefined}
       />}
-      <div className="build-indicator">{meQuery.isError ? t('previewMode') : t('ledgerOnline')}</div>
+      <div className="build-indicator">{meQuery.isError ? t('previewMode') : t('ledgerOnline')} · {typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'dev'}</div>
     </div>
   </div>;
 }

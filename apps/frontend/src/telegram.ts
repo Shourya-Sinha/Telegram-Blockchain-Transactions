@@ -12,17 +12,31 @@ const SHEET_CORNER_RADIUS = 22;
 
 const MOBILE_PLATFORMS = ['android', 'android_x', 'ios'];
 
+/**
+ * Clients that open a mini app in their own window or panel: the chat list and
+ * the rest of Telegram already surround it, so there is nothing behind our
+ * layout to reveal.
+ */
+const WINDOWED_PLATFORMS = ['tdesktop', 'macos', 'weba', 'webk', 'web'];
+
 const FALLBACK_BEHIND_COLOR = '#07101c';
 
 /**
- * Telegram for Android/iOS already renders a mini app that was never expanded
- * as a partial sheet with the chat visible above it. Shrinking our own layout
- * a second time there would stack two gaps, so on that platform the document
- * fills the WebView and Telegram keeps owning the sheet geometry.
+ * True when Telegram, not this app, decides how much of the screen the mini app
+ * covers.
+ *
+ * - Android/iOS render a mini app that was never expanded as a partial sheet
+ *   with the chat visible above it; shrinking our own layout a second time
+ *   there would stack two gaps.
+ * - Desktop and web clients render the app inside a modal window. Reserving
+ *   20% there does not reveal a chat — it only leaves a dead band inside that
+ *   window, which is why the sheet fills it instead.
  */
 function usesNativeTelegramSheet(app?: TelegramWebApp): boolean {
   if (!app) return false;
-  if (!MOBILE_PLATFORMS.includes((app.platform ?? '').toLowerCase())) return false;
+  const platform = (app.platform ?? '').toLowerCase();
+  if (WINDOWED_PLATFORMS.includes(platform)) return true;
+  if (!MOBILE_PLATFORMS.includes(platform)) return false;
   return app.isExpanded !== true && app.isFullscreen !== true;
 }
 

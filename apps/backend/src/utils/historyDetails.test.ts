@@ -89,6 +89,20 @@ test('back always closes the top-most layer and never traps the user', () => {
   assert.match(main, /<ErrorBoundary><App \/><\/ErrorBoundary>/);
 });
 
+test('a redeploy cannot be masked by a WebView-cached bundle', () => {
+  const nginx = read('../frontend/nginx.conf');
+  // The fingerprinted bundles may be cached forever, the entry point never.
+  assert.match(nginx, /location \/assets\/ \{[\s\S]*?immutable[\s\S]*?\}/);
+  assert.match(nginx, /location = \/index\.html \{[\s\S]*?no-store[\s\S]*?\}/);
+  assert.match(nginx, /location \/ \{[\s\S]*?no-store[\s\S]*?try_files/);
+
+  // Which bundle is live must be visible from inside Telegram.
+  const vite = read('../frontend/vite.config.ts');
+  assert.match(vite, /define: \{ __APP_BUILD__: JSON\.stringify\(buildId\) \}/);
+  const app = read('../frontend/src/App.tsx');
+  assert.match(app, /className="build-indicator"[\s\S]{0,160}?__APP_BUILD__/);
+});
+
 test('wallet responses are never served from the WebView cache', () => {
   const api = read('../frontend/src/api.ts');
   assert.match(api, /fetch\(path, \{ cache: 'no-store', \.\.\.options, headers \}\)/);
@@ -97,4 +111,15 @@ test('wallet responses are never served from the WebView cache', () => {
   const server = read('src/server.ts');
   assert.match(server, /app\.set\('etag', false\)/);
   assert.match(server, /res\.set\('Cache-Control', 'no-store, no-cache, must-revalidate'\)/);
+});
+
+test('desktop and web clients get the whole mini app window, not a dead band', () => {
+  const telegram = read('../frontend/src/telegram.ts');
+  // Telegram Desktop/macOS/web open the app in their own modal window, so the
+  // 80% sheet would only leave an empty strip inside it.
+  assert.match(telegram, /const WINDOWED_PLATFORMS = \['tdesktop', 'macos', 'weba', 'webk', 'web'\]/);
+  assert.match(telegram, /if \(WINDOWED_PLATFORMS\.includes\(platform\)\) return true;/);
+  // Phones keep the partial sheet with the chat visible above it.
+  assert.match(telegram, /const MOBILE_PLATFORMS = \['android', 'android_x', 'ios'\]/);
+  assert.match(telegram, /return app\.isExpanded !== true && app\.isFullscreen !== true;/);
 });
