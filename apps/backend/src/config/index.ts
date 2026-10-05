@@ -66,6 +66,10 @@ export const config = {
   telegramWebhookSecret: required('TELEGRAM_WEBHOOK_SECRET', 'development-webhook-secret'),
   telegramWebhookUrl: required('TELEGRAM_WEBHOOK_URL'),
   telegramInitDataMaxAge: number('TELEGRAM_INIT_DATA_MAX_AGE_SECONDS', 86400),
+  // Optional BotFather Mini App short name. When set, group envelope buttons can
+  // open the Mini App directly with a startapp payload instead of first opening
+  // the bot private chat.
+  telegramMiniAppShortName: required('TELEGRAM_MINI_APP_SHORT_NAME').trim(),
   publicAppUrl: required('PUBLIC_APP_URL', 'http://localhost:5173'),
   corsOrigins: required('CORS_ORIGINS', 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
   jwtSecret: required('JWT_SECRET', 'development-only-change-me'),

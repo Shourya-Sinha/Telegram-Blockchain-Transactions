@@ -5,7 +5,7 @@ import { DepositModal } from '../components/DepositModal';
 import { WithdrawModal } from '../components/WithdrawModal';
 import { HistoryPanel } from '../components/HistoryPanel';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
-import { EnvelopeRow, formatMinor, isEnvelopeEntry } from '../components/EnvelopeRow';
+import { EnvelopeRow, formatMinor, isEnvelopeEntry, type OpenEnvelopeHandler } from '../components/EnvelopeRow';
 import { haptic } from '../telegram';
 import { greetingKey, ledgerTypeLabel, useT } from '../i18n';
 
@@ -17,10 +17,9 @@ const withdrawHint = (me: MeResponse, t: ReturnType<typeof useT>): string | unde
   return t('withdrawDisabledHint');
 };
 
-export function WalletScreen({ me, onClaim }: { me: MeResponse; onClaim: (id: string) => void }) {
+export function WalletScreen({ me, onClaim, showHistory, onShowHistory, onCloseHistory }: { me: MeResponse; onClaim: OpenEnvelopeHandler; showHistory: boolean; onShowHistory: () => void; onCloseHistory: () => void }) {
   const t = useT();
   const [modal, setModal] = useState<'deposit' | 'withdraw' | undefined>();
-  const [showHistory, setShowHistory] = useState(false);
   const ledger = useQuery({ queryKey: ['ledger'], queryFn: () => api<LedgerEntry[]>('/api/ledger'), retry: false });
   const available = formatMinor(me.wallet.availableMinor);
   const locked = formatMinor(me.wallet.lockedMinor);
@@ -28,7 +27,7 @@ export function WalletScreen({ me, onClaim }: { me: MeResponse; onClaim: (id: st
   const testBanner = me.fundsMode === 'test'
     ? (me.withdrawalMode === 'test' ? t('testBannerTestWithdraw') : t('testBannerDisabled'))
     : '';
-  if (showHistory) return <HistoryPanel testMode={me.fundsMode === 'test'} onClose={() => setShowHistory(false)} onOpenEnvelope={onClaim} />;
+  if (showHistory) return <HistoryPanel testMode={me.fundsMode === 'test'} onClose={onCloseHistory} onOpenEnvelope={onClaim} />;
   return <main className="screen wallet-screen">
     <header className="topbar">
       <div><p className="eyebrow">{t('yourPortfolio')}</p><h1>{t(greetingKey(), { name: firstName })}</h1></div>
@@ -39,10 +38,10 @@ export function WalletScreen({ me, onClaim }: { me: MeResponse; onClaim: (id: st
     <div className="action-row">
       <button disabled={!me.depositsEnabled} title={!me.depositsEnabled ? t('testBannerDisabled') : undefined} onClick={() => { haptic(); setModal('deposit'); }}><span className="action-icon deposit">↓</span><span>{t('deposit')}</span></button>
       <button disabled={!me.withdrawalsEnabled} title={withdrawHint(me, t)} onClick={() => { haptic(); setModal('withdraw'); }}><span className="action-icon withdraw">↑</span><span>{me.withdrawalMode === 'test' ? t('withdrawTest') : t('withdraw')}</span></button>
-      <button onClick={() => { haptic(); setShowHistory(true); }}><span className="action-icon transfer">🕘</span><span>{t('history')}</span></button>
+      <button onClick={() => { haptic(); onShowHistory(); }}><span className="action-icon transfer">🕘</span><span>{t('history')}</span></button>
     </div>
     <section className="section"><div className="section-heading"><h2>{t('assets')}</h2><button className="text-button">{t('manage')}</button></div><div className="token-list"><Token icon="G" name="Gram" ticker="GRAM" value="0.00" /><Token icon="$" name={t('tether')} ticker="USDT" value={available} highlighted /></div></section>
-    <section className="section activity-section"><div className="section-heading"><h2>{t('recentActivity')}</h2><button className="text-button" onClick={() => { haptic(); setShowHistory(true); }}>{t('seeAll')}</button></div>{ledger.data?.length ? <div className="activity-list">{ledger.data.slice(0, 4).map((entry) => isEnvelopeEntry(entry) ? <EnvelopeRow key={entry.id} entry={entry} onOpen={onClaim} /> : <button className="activity-row" key={entry.id} onClick={() => entry.type === 'CLAIM' && onClaim(entry.referenceId ?? '')}><span className={`activity-icon ${entry.direction === 'CREDIT' ? 'credit' : 'debit'}`}>{entry.direction === 'CREDIT' ? '↓' : '↑'}</span><span className="activity-info"><strong>{ledgerTypeLabel(t, entry.type)}</strong><small>{formatDate(entry.createdAt)}</small></span><span className={entry.direction === 'CREDIT' ? 'activity-amount credit-text' : 'activity-amount'}>{entry.direction === 'CREDIT' ? '+' : '-'}{formatMinor(entry.amountMinor)} USDT</span></button>)}</div> : <div className="empty-activity"><span>✦</span><p>{t('activityEmptyTitle')}</p><small>{t('activityEmptyHint')}</small></div>}</section>
+    <section className="section activity-section"><div className="section-heading"><h2>{t('recentActivity')}</h2><button className="text-button" onClick={() => { haptic(); onShowHistory(); }}>{t('seeAll')}</button></div>{ledger.data?.length ? <div className="activity-list">{ledger.data.slice(0, 4).map((entry) => isEnvelopeEntry(entry) ? <EnvelopeRow key={entry.id} entry={entry} onOpen={onClaim} /> : <button className="activity-row" key={entry.id} onClick={() => entry.type === 'CLAIM' && onClaim(entry.referenceId ?? '')}><span className={`activity-icon ${entry.direction === 'CREDIT' ? 'credit' : 'debit'}`}>{entry.direction === 'CREDIT' ? '↓' : '↑'}</span><span className="activity-info"><strong>{ledgerTypeLabel(t, entry.type)}</strong><small>{formatDate(entry.createdAt)}</small></span><span className={entry.direction === 'CREDIT' ? 'activity-amount credit-text' : 'activity-amount'}>{entry.direction === 'CREDIT' ? '+' : '-'}{formatMinor(entry.amountMinor)} USDT</span></button>)}</div> : <div className="empty-activity"><span>✦</span><p>{t('activityEmptyTitle')}</p><small>{t('activityEmptyHint')}</small></div>}</section>
     {modal === 'deposit' && <DepositModal address={me.depositAddress} confirmations={19} onClose={() => setModal(undefined)} />}
     {modal === 'withdraw' && <WithdrawModal me={me} onClose={() => setModal(undefined)} />}
   </main>;

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
-import { assertTelegramGroupMembership, isTelegramGroupMember } from '../services/telegramService';
+import { assertTelegramGroupMembership, isTelegramGroupMember, refreshEnvelopeMessageKeyboard } from '../services/telegramService';
 import { getLedger, getWalletSummary } from '../services/ledgerService';
 import { createWithdrawal } from '../services/withdrawalService';
 import { telegramAuth } from '../middleware/auth';
@@ -104,7 +104,9 @@ userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (
 
 userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
-  await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
+  const user = req.telegramUser!;
+  const isHistoryParticipant = envelope.senderId === user.id || envelope.claims.some((claim: { userId: string }) => claim.userId === user.id);
+  if (!isHistoryParticipant) await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
   // Flag which claim belongs to the viewer so the Mini App can reopen an
   // already-opened envelope straight to its detail view, exactly like WeChat.
   // Internal user ids are not exposed — only the display name of each claimer.
@@ -113,14 +115,20 @@ userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
     amountMinor: claim.amountMinor,
     claimedAt: claim.claimedAt,
     user: claim.user,
-    mine: claim.userId === req.telegramUser!.id
+    mine: claim.userId === user.id
   }));
   res.json(jsonSafe({ ...envelope, claims }));
 }));
 userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
-  await assertTelegramGroupMembership(envelope.groupId, req.telegramUser!.telegramId);
-  const result = await claimEnvelope(req.telegramUser!.id, envelope.id, req.ip);
+  const user = req.telegramUser!;
+  // A sender can reopen an active envelope from their own History and take an
+  // unclaimed share. Other users still must be verified as current group
+  // members before claiming from a forwarded/direct envelope link.
+  if (envelope.senderId !== user.id) await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
+  const result = await claimEnvelope(user.id, envelope.id, req.ip);
+  const latestEnvelope = await getEnvelope(envelope.id);
+  void refreshEnvelopeMessageKeyboard(latestEnvelope);
   res.json(jsonSafe(result));
 }));
 

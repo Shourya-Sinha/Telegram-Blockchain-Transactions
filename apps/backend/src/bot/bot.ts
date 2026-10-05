@@ -3,10 +3,10 @@ import { config } from '../config';
 import { redis } from '../lib/redis';
 import { prisma } from '../lib/prisma';
 import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../services/ledgerService';
-import { claimEnvelope, getEnvelope } from '../services/envelopeService';
+import { getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { registerTelegramGroup } from '../services/groupService';
-import { assertTelegramGroupMembership, chatAppKeyboard, installGroupButtonGuard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot, walletDeepLink } from '../services/telegramService';
+import { assertTelegramGroupMembership, chatAppKeyboard, envelopeAppUrl, envelopeDeepLink, envelopeIdFromStartPayload, historyAppUrl, historyDeepLink, installGroupButtonGuard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
 import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
 import { botTexts, normalizeLocale } from './texts';
@@ -65,7 +65,18 @@ export function createTelegramBot(): Bot {
       await ctx.reply(texts.startGroup, { reply_markup: chatAppKeyboard(texts.walletGroupButton, ctx.chat.type) });
       return;
     }
-    // Arrived through the "Open My Wallet" deep link from a group message.
+    // Arrived through a t.me deep link from a group message. When a BotFather
+    // Mini App short name is configured this hop is skipped and Telegram opens
+    // the Mini App directly with the same start payload.
+    const envelopeId = envelopeIdFromStartPayload(payload);
+    if (envelopeId) {
+      await ctx.reply(texts.openEnvelopePrompt, { reply_markup: miniAppKeyboard(texts.openEnvelopeButton, envelopeAppUrl(envelopeId)) });
+      return;
+    }
+    if (payload === 'history') {
+      await ctx.reply(texts.historyFooter, { reply_markup: miniAppKeyboard(texts.historyButton, historyAppUrl()) });
+      return;
+    }
     if (payload === 'wallet') {
       const wallet = await getWalletSummary(user.id);
       const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
@@ -214,7 +225,7 @@ export function createTelegramBot(): Bot {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
     const texts = botTexts(normalizeLocale(user.locale));
-    const keyboard = chatAppKeyboard(texts.historyButton, ctx.chat?.type);
+    const keyboard = chatAppKeyboard(texts.historyButton, ctx.chat?.type, historyAppUrl(), historyDeepLink());
     if (!ledger.length) {
       await ctx.reply(texts.historyEmpty, { reply_markup: keyboard });
       return;
@@ -262,7 +273,8 @@ export function createTelegramBot(): Bot {
     const ledger = await getLedger(user.id, 10);
     const texts = botTexts(normalizeLocale(user.locale));
     await ctx.answerCallbackQuery();
-    await ctx.reply(ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : texts.historyEmpty);
+    const summary = ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : texts.historyEmpty;
+    await ctx.reply([summary, '', texts.historyFooter].join('\n'), { reply_markup: miniAppKeyboard(texts.historyButton, historyAppUrl()) });
   });
   bot.callbackQuery('menu:deposit', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
@@ -303,52 +315,30 @@ export function createTelegramBot(): Bot {
       const user = await ensureWalletForTelegram(telegramIdentity(ctx));
       const envelope = await getEnvelope(envelopeId);
       await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
-      const result = await claimEnvelope(user.id, envelopeId);
       const locale = await userLocale(user.id);
       const texts = botTexts(locale);
-      await ctx.answerCallbackQuery({
-        text: texts.claimAlert(formatMinor(result.claim.amountMinor), formatMinor(result.availableMinor)),
-        show_alert: true
-      });
-      // After a claim the user immediately wants their wallet details. Send
-      // them privately (never in the group) with a button straight into the
-      // Mini App, in the language picked with the Mini App flag selector.
-      // Users who never started the bot cannot be messaged; the callback
-      // alert above still shows the balance in that case.
+      const openLink = envelopeDeepLink(envelopeId);
+
+      await ctx.answerCallbackQuery(openLink
+        ? { text: texts.openEnvelopeAlert, url: openLink }
+        : { text: texts.openEnvelopeAlert, show_alert: true });
+
+      // Old envelope messages may still have callback buttons from a previous
+      // deployment. Do not claim from the callback anymore; direct the user to
+      // the Mini App so they see the sealed envelope, tap the gold seal, then
+      // watch the opening animation before the amount is revealed.
       try {
-        const wallet = await getWalletSummary(user.id);
-        const keyboard = miniAppKeyboard(texts.walletDetailsButton);
-        const currencyNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
         await ctx.api.sendMessage(
           user.telegramId.toString(),
-          [
-            texts.claimDmHeader,
-            '',
-            texts.claimDmClaimed(formatMinor(result.claim.amountMinor)),
-            texts.claimDmAvailable(formatMinor(wallet.availableMinor)),
-            texts.claimDmLocked(formatMinor(wallet.lockedMinor)),
-            '',
-            texts.claimDmOpenApp
-          ].join('\n') + currencyNote,
-          { parse_mode: 'HTML', reply_markup: keyboard }
+          texts.openEnvelopePrompt,
+          { reply_markup: miniAppKeyboard(texts.openEnvelopeButton, envelopeAppUrl(envelopeId)) }
         );
       } catch (dmError) {
-        console.warn('[telegram-claim-dm] could not message user (they may not have started the bot)', dmError);
-      }
-      const latestEnvelope = await getEnvelope(envelopeId);
-      if (latestEnvelope.remainingSlots <= 0) {
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
-      } else {
-        const keyboard = new InlineKeyboard().text(`🧧 Claim red envelope · ${latestEnvelope.remainingSlots} left`, latestEnvelope.id);
-        // The envelope message is in a group: web_app buttons are private-chat
-        // only, so attach a t.me deep link instead.
-        const deepLink = walletDeepLink();
-        if (deepLink) keyboard.row().url(texts.groupWalletButton, deepLink);
-        await ctx.editMessageReplyMarkup({ reply_markup: keyboard }).catch(() => undefined);
+        console.warn('[telegram-open-envelope-dm] could not message user (they may not have started the bot)', dmError);
       }
     } catch (error) {
       await ctx.answerCallbackQuery({
-        text: error instanceof Error ? error.message.slice(0, 190) : 'Unable to claim',
+        text: error instanceof Error ? error.message.slice(0, 190) : 'Unable to open envelope',
         show_alert: true
       });
     }

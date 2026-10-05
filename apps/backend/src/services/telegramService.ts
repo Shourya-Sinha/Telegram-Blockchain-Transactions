@@ -30,24 +30,78 @@ export function isTelegramWebAppUrl(url: string): boolean {
   }
 }
 
+function appUrlWithParams(params?: Record<string, string>): string {
+  try {
+    const url = new URL(config.publicAppUrl);
+    for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value);
+    return url.toString();
+  } catch {
+    return config.publicAppUrl;
+  }
+}
+
+export function walletAppUrl(): string {
+  return appUrlWithParams();
+}
+
+export function historyAppUrl(): string {
+  return appUrlWithParams({ view: 'history' });
+}
+
+export function envelopeAppUrl(envelopeId: string): string {
+  return appUrlWithParams({ envelope: envelopeId });
+}
+
 /** Keyboard with a single "open the Mini App" button, or undefined when the URL is not usable. */
-export function miniAppKeyboard(label: string): InlineKeyboard | undefined {
-  return isTelegramWebAppUrl(config.publicAppUrl) ? new InlineKeyboard().webApp(label, config.publicAppUrl) : undefined;
+export function miniAppKeyboard(label: string, appUrl = walletAppUrl()): InlineKeyboard | undefined {
+  return isTelegramWebAppUrl(appUrl) ? new InlineKeyboard().webApp(label, appUrl) : undefined;
 }
 
 export function getBotUsername(): string | undefined {
   return activeBot?.botInfo?.username;
 }
 
-/**
- * t.me deep link that opens the bot's private chat and runs /start wallet.
- * Group messages cannot carry native web_app buttons, so this is how a group
- * member reaches the wallet: one tap opens the bot chat, where the wallet
- * buttons and the persistent 🧧 menu button live.
- */
-export function walletDeepLink(): string | undefined {
+const START_PAYLOAD_MAX_LENGTH = 512;
+
+export function envelopeStartPayload(envelopeId: string): string {
+  return `envelope_${envelopeId}`;
+}
+
+export function envelopeIdFromStartPayload(payload: string | undefined): string | undefined {
+  const match = (payload ?? '').trim().match(/^envelope[_-]([0-9a-f]{8}-[0-9a-f-]{27,})$/i);
+  return match?.[1];
+}
+
+export function miniAppStartLink(startPayload?: string): string | undefined {
   const username = getBotUsername();
-  return username ? `https://t.me/${username}?start=wallet` : undefined;
+  const shortName = config.telegramMiniAppShortName;
+  if (!username || !shortName) return undefined;
+  if (startPayload && startPayload.length > START_PAYLOAD_MAX_LENGTH) return undefined;
+  const suffix = startPayload ? `?startapp=${encodeURIComponent(startPayload)}` : '';
+  return `https://t.me/${username}/${shortName}${suffix}`;
+}
+
+/**
+ * t.me deep link that opens the bot's private chat and runs /start with an
+ * optional payload. Group messages cannot carry native web_app buttons, so
+ * this fallback opens the private chat where the bot can show a web_app button.
+ */
+export function botStartDeepLink(payload = 'wallet'): string | undefined {
+  const username = getBotUsername();
+  return username ? `https://t.me/${username}?start=${encodeURIComponent(payload)}` : undefined;
+}
+
+export function walletDeepLink(): string | undefined {
+  return miniAppStartLink('wallet') ?? botStartDeepLink('wallet');
+}
+
+export function historyDeepLink(): string | undefined {
+  return miniAppStartLink('history') ?? botStartDeepLink('history');
+}
+
+export function envelopeDeepLink(envelopeId: string): string | undefined {
+  const payload = envelopeStartPayload(envelopeId);
+  return miniAppStartLink(payload) ?? botStartDeepLink(payload);
 }
 
 /**
@@ -56,12 +110,11 @@ export function walletDeepLink(): string | undefined {
  * BUTTON_TYPE_INVALID. Pick the button type by chat: web_app in private chats,
  * t.me deep link everywhere else.
  */
-export function chatAppKeyboard(label: string, chatType?: string): InlineKeyboard | undefined {
+export function chatAppKeyboard(label: string, chatType?: string, appUrl = walletAppUrl(), groupDeepLink = walletDeepLink()): InlineKeyboard | undefined {
   if (chatType === 'group' || chatType === 'supergroup') {
-    const deepLink = walletDeepLink();
-    return deepLink ? new InlineKeyboard().url(label, deepLink) : undefined;
+    return groupDeepLink ? new InlineKeyboard().url(label, groupDeepLink) : undefined;
   }
-  return miniAppKeyboard(label);
+  return miniAppKeyboard(label, appUrl);
 }
 
 type ButtonPayload = {
@@ -117,15 +170,47 @@ type PublishableEnvelope = {
   sender?: { firstName?: string | null } | null;
 };
 
+type EnvelopeKeyboardState = {
+  id: string;
+  groupId: bigint;
+  messageId: number;
+  remainingSlots: number;
+  status: string;
+};
+
+function envelopeGroupKeyboard(envelopeId: string, remainingSlots?: number, status = 'ACTIVE'): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  const canClaim = status === 'ACTIVE' && (remainingSlots === undefined || remainingSlots > 0);
+  const claimLink = envelopeDeepLink(envelopeId);
+  if (canClaim) {
+    const label = remainingSlots === undefined
+      ? '🧧 Claim red envelope · 拆红包'
+      : `🧧 Claim red envelope · ${remainingSlots} left`;
+    if (claimLink) keyboard.url(label, claimLink);
+    else keyboard.text(label, envelopeId);
+  }
+  const walletLink = walletDeepLink();
+  if (walletLink) keyboard.row().url('💰 Open My Wallet · 打开钱包', walletLink);
+  return keyboard;
+}
+
+export async function refreshEnvelopeMessageKeyboard(envelope: EnvelopeKeyboardState): Promise<void> {
+  if (!envelope.messageId) return;
+  try {
+    await getTelegramBot().api.editMessageReplyMarkup(envelope.groupId.toString(), envelope.messageId, {
+      reply_markup: envelopeGroupKeyboard(envelope.id, envelope.remainingSlots, envelope.status)
+    });
+  } catch (error) {
+    console.warn('[telegram-envelope-keyboard] could not update envelope message', error);
+  }
+}
+
 export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Promise<number> {
-  // The claim button stays first; the wallet button underneath is how a group
-  // member reaches the Mini App and sees their balance/history right where
-  // they claimed. It is bilingual because a group message is the same for
-  // every viewer, and it must be a plain t.me deep link — web_app buttons are
-  // rejected by Telegram outside private chats (BUTTON_TYPE_INVALID).
-  const keyboard = new InlineKeyboard().text('🧧 Claim red envelope · 领取红包', envelope.id);
-  const deepLink = walletDeepLink();
-  if (deepLink) keyboard.row().url('💰 Open My Wallet · 打开钱包', deepLink);
+  // The first button now opens the Mini App envelope screen instead of claiming
+  // inside a Telegram callback. Groups still cannot use web_app buttons, so it
+  // is a t.me deep link (direct startapp when TELEGRAM_MINI_APP_SHORT_NAME is
+  // configured; otherwise /start sends the private web_app button).
+  const keyboard = envelopeGroupKeyboard(envelope.id);
   const mode = envelope.mode === 'EQUAL' ? 'even split · 平均' : 'lucky draw · 拼手气';
   const senderName = envelope.sender?.firstName?.trim();
   // WeChat-style announcement: "{name}'s red envelope" plus the classic

@@ -138,6 +138,7 @@ export function initializeTelegram(): () => void {
 }
 
 export function telegramInitData(): string { return webApp()?.initData ?? ''; }
+export function telegramStartParam(): string { return webApp()?.initDataUnsafe?.start_param ?? ''; }
 export function haptic(style: 'light' | 'medium' | 'heavy' = 'light'): void { try { webApp()?.HapticFeedback.impactOccurred(style); } catch { /* browsers outside Telegram do not expose haptics */ } }
 export function successHaptic(): void { try { webApp()?.HapticFeedback.notificationOccurred('success'); } catch { /* no-op outside Telegram */ } }
 export function configureBackButton(onBack: () => void, visible: boolean): () => void {
