@@ -137,14 +137,41 @@ export function initializeTelegram(): () => void {
   };
 }
 
+/**
+ * Telegram's drag-to-dismiss gesture competes with scrollable overlays: a swipe
+ * inside the red envelope or a transaction sheet drags the whole mini app
+ * instead of scrolling, which reads as a frozen screen. Overlays switch the
+ * gesture off while they are open and restore it on close.
+ */
+export function setSwipeDismissEnabled(enabled: boolean): void {
+  const app = webApp();
+  if (!app) return;
+  try {
+    if (enabled) app.enableVerticalSwipes?.();
+    else app.disableVerticalSwipes?.();
+  } catch {
+    // Clients older than Bot API 7.7 do not expose the swipe API.
+  }
+}
+
 export function telegramInitData(): string { return webApp()?.initData ?? ''; }
 export function telegramStartParam(): string { return webApp()?.initDataUnsafe?.start_param ?? ''; }
 export function haptic(style: 'light' | 'medium' | 'heavy' = 'light'): void { try { webApp()?.HapticFeedback.impactOccurred(style); } catch { /* browsers outside Telegram do not expose haptics */ } }
 export function successHaptic(): void { try { webApp()?.HapticFeedback.notificationOccurred('success'); } catch { /* no-op outside Telegram */ } }
+/**
+ * Wires Telegram's native back arrow to the app's top-most layer. Every call
+ * replaces the previous handler, so the arrow always closes what is actually on
+ * screen (envelope → transaction details → history → wallet) and never leaves
+ * the user stuck inside an overlay.
+ */
 export function configureBackButton(onBack: () => void, visible: boolean): () => void {
   const button = webApp()?.BackButton;
   if (!button) return () => undefined;
-  if (visible) button.show(); else button.hide();
-  button.onClick(onBack);
-  return () => button.offClick(onBack);
+  try {
+    if (visible) button.show(); else button.hide();
+    button.onClick(onBack);
+  } catch {
+    return () => undefined;
+  }
+  return () => { try { button.offClick(onBack); } catch { /* client without BackButton support */ } };
 }

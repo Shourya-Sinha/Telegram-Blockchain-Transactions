@@ -7,16 +7,27 @@ export type OpenEnvelopeHandler = (envelopeId: string, options?: { viewOnly?: bo
 
 export function formatMinor(value: string | bigint | undefined): string {
   if (!value) return '0.00';
-  const n = BigInt(value);
-  return `${n / 1_000_000n}.${(n % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
+  try {
+    const n = BigInt(value);
+    const negative = n < 0n;
+    const abs = negative ? -n : n;
+    return `${negative ? '-' : ''}${abs / 1_000_000n}.${(abs % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
+  } catch {
+    // Never let a malformed amount take the whole screen down.
+    return '0.00';
+  }
 }
 
 export function formatDateTime(date: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(date));
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(parsed);
 }
 
 export function formatClock(date: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(date));
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(parsed);
 }
 
 /**
@@ -28,10 +39,22 @@ export function isEnvelopeEntry(entry: Pick<LedgerEntry, 'type' | 'referenceType
 }
 
 /**
+ * An envelope row is still openable (sealed, tap to claim) only while the
+ * envelope is ACTIVE with shares left and this row is the sender's debit.
+ * Claims, refunds and finished envelopes open as read-only details instead.
+ */
+export function isClaimableEntry(entry: LedgerEntry): boolean {
+  if (entry.type !== 'TRANSFER' || entry.referenceType !== 'RED_ENVELOPE') return false;
+  const meta = entry.envelope;
+  if (!meta) return true; // metadata missing: let the envelope screen decide
+  return meta.status === 'ACTIVE' && meta.remainingSlots > 0;
+}
+
+/**
  * WeChat-style envelope row used by Recent activity and the History panel.
- * Every envelope row opens its envelope UI. Claimed/refunded/finished rows open
- * as read-only details; an active sent row opens sealed so the current user can
- * tap the seal and claim if they are eligible.
+ * Every envelope row opens something: a still-open envelope you sent opens
+ * sealed so you can tap the seal, and every other envelope row opens its
+ * read-only details (amount, sender, shares, status, claim list).
  *
  * - claimed (CLAIM): light-red *opened* envelope, "From {sender}", +amount
  * - sent (TRANSFER): bright-red *sealed* envelope, -amount, claimed progress
@@ -70,8 +93,8 @@ export function EnvelopeRow({ entry, onOpen }: { entry: LedgerEntry; onOpen?: Op
   </>;
 
   if (onOpen && entry.referenceId) {
-    const readOnly = isClaim || isRefund || (meta?.status !== undefined && meta.status !== 'ACTIVE');
-    return <button className={`envelope-row ${variant}`} onClick={() => { haptic(); onOpen(entry.referenceId!, { viewOnly: readOnly }); }}>{content}</button>;
+    const claimable = isClaimableEntry(entry);
+    return <button type="button" className={`envelope-row ${variant}`} onClick={() => { haptic(); onOpen(entry.referenceId, { viewOnly: !claimable }); }}>{content}</button>;
   }
   return <div className={`envelope-row ${variant}`}>{content}</div>;
 }

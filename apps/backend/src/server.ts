@@ -22,6 +22,18 @@ app.use(cors({ origin: (origin, callback) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'));
 
+// Wallet, ledger and envelope responses are per-user and change on every
+// claim. Express' default ETag made WebViews revalidate and reuse cached
+// bodies (the `304 … /api/envelopes/<id>` lines in the server log), which
+// showed stale balances and, in clients that surface the bare 304 to fetch(),
+// made a live envelope look unavailable.
+app.set('etag', false);
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  next();
+});
+
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'red-envelope-backend', time: new Date().toISOString() }));
 app.get('/ready', (_req, res) => res.json({ ok: true }));
 app.use('/api/admin', adminRouter);
