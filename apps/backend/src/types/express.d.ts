@@ -8,6 +8,7 @@ declare global {
         telegramId: bigint;
         username?: string;
         firstName: string;
+        locale: string;
         createdAt: Date;
         isAdmin: boolean;
         status: string;

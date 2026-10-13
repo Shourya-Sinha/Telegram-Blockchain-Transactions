@@ -3,17 +3,19 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { Modal } from './Modal';
 import { api } from '../api';
 import { haptic } from '../telegram';
+import { useT } from '../i18n';
 
 export function DepositModal({ address, confirmations, onClose }: { address?: string; confirmations: number; onClose: () => void }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const value = address ?? '';
   const copy = async () => { haptic(); if (value) await navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1600); };
-  return <Modal title="Deposit USDT" onClose={onClose}>
+  return <Modal title={t('depositTitle')} onClose={onClose}>
     <div className="deposit-content">
-      <div className="qr-wrap">{value ? <QRCodeCanvas value={value} size={164} bgColor="#ffffff" fgColor="#0a1220" includeMargin /> : <div className="qr-empty">Address unavailable</div>}</div>
-      <p className="muted center">Only send USDT using the TRC20 network. Deposits need {confirmations} confirmations.</p>
-      <div className="address-box"><span>{value || 'Configure a deposit address'}</span><button onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
-      <div className="warning-box"><span>!</span><p>Sending another token or network may result in permanent loss. Double-check the address before sending.</p></div>
+      <div className="qr-wrap">{value ? <QRCodeCanvas value={value} size={164} bgColor="#ffffff" fgColor="#0a1220" includeMargin /> : <div className="qr-empty">{t('addressUnavailable')}</div>}</div>
+      <p className="muted center">{t('depositHint', { confirmations })}</p>
+      <div className="address-box"><span>{value || t('configureDepositAddress')}</span><button onClick={copy}>{copied ? t('copied') : t('copy')}</button></div>
+      <div className="warning-box"><span>!</span><p>{t('depositWarning')}</p></div>
     </div>
   </Modal>;
 }

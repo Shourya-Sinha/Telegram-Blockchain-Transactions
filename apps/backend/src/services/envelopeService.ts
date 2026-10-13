@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
 import { createEnvelopeSchema, parseUsdtToMinor } from '@red-envelope/shared';
 import { prisma } from '../lib/prisma';
@@ -6,60 +6,93 @@ import { redis } from '../lib/redis';
 import { AppError, isPrismaUniqueError } from '../utils/errors';
 import { assertClaimEligibility } from './eligibilityService';
 import { creditWallet, debitWallet, type Transaction, writeAudit } from './ledgerService';
+import { randomClaimAmount } from '../utils/envelopeAllocation';
 
-type CreateInput = { total: string; count: number; mode: 'RANDOM' | 'EQUAL'; groupId: string; expiresInMinutes: number; messageId?: number; ipAddress?: string };
+export type CreateEnvelopeInput = {
+  total: string;
+  count: number;
+  mode: 'RANDOM' | 'EQUAL';
+  groupId: string;
+  expiresInMinutes: number;
+  messageId?: number;
+  ipAddress?: string;
+  actorId?: string;
+};
 
-function randomBigInt(maxExclusive: bigint): bigint {
-  if (maxExclusive <= 0n) throw new Error('random upper bound must be positive');
-  const bytes = Math.ceil(maxExclusive.toString(2).length / 8);
-  const excessBits = BigInt(bytes * 8) - BigInt(maxExclusive.toString(2).length);
-  const mask = (1n << BigInt(bytes * 8)) - 1n;
-  while (true) {
-    const candidate = BigInt(`0x${randomBytes(bytes).toString('hex')}`) & mask;
-    const normalized = excessBits > 0n ? candidate >> excessBits : candidate;
-    if (normalized < maxExclusive) return normalized;
-  }
-}
-
-/** Integer-only version of the classic "double mean" envelope algorithm. */
-function randomClaimAmount(remaining: bigint, slots: number): bigint {
-  if (slots <= 1) return remaining;
-  const maxByMean = (remaining / BigInt(slots)) * 2n;
-  const maxByRemainder = remaining - BigInt(slots - 1); // leave at least one minor unit per slot
-  const maximum = maxByMean < maxByRemainder ? maxByMean : maxByRemainder;
-  if (maximum <= 1n) return 1n;
-  return randomBigInt(maximum) + 1n;
-}
-
-export async function createEnvelope(senderId: string, input: CreateInput) {
+export async function createEnvelope(senderId: string, input: CreateEnvelopeInput) {
   const parsed = createEnvelopeSchema.parse(input);
   if ((await redis.get('emergency:envelopes-disabled')) === '1') throw new AppError(503, 'Red envelope creation is temporarily disabled', 'ENVELOPES_DISABLED');
   const totalMinor = parseUsdtToMinor(parsed.total);
   const groupId = BigInt(parsed.groupId);
+  const group = await prisma.groupSetting.findUnique({ where: { chatId: groupId }, select: { enabled: true } });
+  if (!group) throw new AppError(404, 'This Telegram group is not registered. Add the bot and run /registergroup there first.', 'GROUP_NOT_REGISTERED');
+  if (!group.enabled) throw new AppError(403, 'Red envelopes are disabled in this group', 'GROUP_DISABLED');
   if (totalMinor < BigInt(parsed.count)) throw new AppError(400, 'Each slot must contain at least 0.000001 USDT', 'AMOUNT_TOO_SMALL');
   const id = randomUUID();
-  return prisma.$transaction(async (tx: Transaction) => {
-    const envelope = await tx.redEnvelope.create({ data: {
-      id,
-      senderId,
-      groupId,
-      messageId: input.messageId ?? 0,
-      totalMinor,
-      remainingMinor: totalMinor,
-      totalSlots: parsed.count,
-      remainingSlots: parsed.count,
-      mode: parsed.mode as EnvelopeMode,
-      expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
-      status: EnvelopeStatus.ACTIVE
-    } });
-    const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
-    await writeAudit(tx, { action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode } });
-    return { envelope, availableMinor: debit.availableMinor };
-  }, { isolationLevel: 'ReadCommitted' });
+  try {
+    return await prisma.$transaction(async (tx: Transaction) => {
+      const envelope = await tx.redEnvelope.create({ data: {
+        id,
+        senderId,
+        groupId,
+        messageId: input.messageId ?? 0,
+        totalMinor,
+        remainingMinor: totalMinor,
+        totalSlots: parsed.count,
+        remainingSlots: parsed.count,
+        mode: parsed.mode as EnvelopeMode,
+        expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
+        status: EnvelopeStatus.ACTIVE
+      }, include: { sender: { select: { firstName: true } } } });
+      const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
+      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId } });
+      return { envelope, availableMinor: debit.availableMinor };
+    }, { isolationLevel: 'ReadCommitted' });
+  } catch (error) {
+    // Turn the bare ledger rejection into an actionable message: include how
+    // much the envelope needs so the user knows what to top up.
+    if (error instanceof AppError && error.code === 'INSUFFICIENT_BALANCE') {
+      throw new AppError(400, `Insufficient available balance: this envelope needs ${parsed.total} USDT but your available balance is lower. Top up your wallet and try again.`, 'INSUFFICIENT_BALANCE');
+    }
+    throw error;
+  }
 }
 
 async function lockEnvelope(tx: Transaction, envelopeId: string): Promise<void> {
   await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"RedEnvelope\" WHERE \"id\" = $1 FOR UPDATE`, envelopeId);
+}
+
+export async function attachEnvelopeMessage(envelopeId: string, messageId: number): Promise<void> {
+  await prisma.redEnvelope.update({ where: { id: envelopeId }, data: { messageId } });
+}
+
+/**
+ * Compensates a failed Telegram publication. The debit and refund stay visible in
+ * the ledger instead of leaving an active envelope that nobody can open.
+ */
+export async function refundUnpublishedEnvelope(envelopeId: string, actorId?: string, reason?: string): Promise<void> {
+  await prisma.$transaction(async (tx: Transaction) => {
+    await lockEnvelope(tx, envelopeId);
+    const envelope = await tx.redEnvelope.findUnique({ where: { id: envelopeId } });
+    if (!envelope || envelope.status !== EnvelopeStatus.ACTIVE) return;
+    const claimCount = await tx.redEnvelopeClaim.count({ where: { envelopeId } });
+    if (claimCount > 0) return;
+    await tx.redEnvelope.update({
+      where: { id: envelopeId },
+      data: { status: EnvelopeStatus.REFUNDED, remainingMinor: 0n, remainingSlots: 0 }
+    });
+    if (envelope.remainingMinor > 0n) {
+      await creditWallet(tx, envelope.senderId, envelope.remainingMinor, LedgerType.REFUND, 'RED_ENVELOPE', envelope.id);
+    }
+    await writeAudit(tx, {
+      actorId,
+      action: 'RED_ENVELOPE_PUBLICATION_FAILED',
+      entityType: 'RedEnvelope',
+      entityId: envelope.id,
+      before: { status: envelope.status, remainingMinor: envelope.remainingMinor.toString() },
+      after: { status: EnvelopeStatus.REFUNDED, reason: reason?.slice(0, 300) }
+    });
+  });
 }
 
 export async function claimEnvelope(userId: string, envelopeId: string, ipAddress?: string) {

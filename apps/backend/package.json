@@ -4,16 +4,19 @@
   "private": true,
   "main": "dist/server.js",
   "scripts": {
+    "predev": "npm run prisma:generate && npm run build --workspace=@red-envelope/shared",
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:dev-credit": "tsx prisma/devCredit.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.2.1",
+    "@prisma/client": "6.2.1",
     "@red-envelope/shared": "1.0.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.30.0",
@@ -36,9 +39,11 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.5",
-    "prisma": "^6.2.1",
-    "tsx": "^4.19.2",
+    "prisma": "6.2.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2"
   },
-  "prisma": { "seed": "tsx prisma/seed.ts" }
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
 }

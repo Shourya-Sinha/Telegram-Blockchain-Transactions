@@ -1,18 +1,34 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { config } from '../config';
 import { redis } from '../lib/redis';
+import { prisma } from '../lib/prisma';
 import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../services/ledgerService';
-import { createEnvelope, claimEnvelope } from '../services/envelopeService';
-import { formatMinor, parseUsdtToMinor } from '@red-envelope/shared';
+import { getEnvelope } from '../services/envelopeService';
+import { createAndPublishEnvelope } from '../services/envelopePublishingService';
+import { registerTelegramGroup } from '../services/groupService';
+import { assertTelegramGroupMembership, chatAppKeyboard, envelopeAppUrl, envelopeDeepLink, envelopeIdFromStartPayload, historyAppUrl, historyDeepLink, installGroupButtonGuard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
+import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
+import { botTexts, normalizeLocale } from './texts';
 
 function telegramIdentity(ctx: { from?: { id: number; username?: string; first_name: string } }) {
   if (!ctx.from) throw new AppError(401, 'Telegram user is missing', 'TELEGRAM_USER_MISSING');
   return { telegramId: BigInt(ctx.from.id), username: ctx.from.username, firstName: ctx.from.first_name };
 }
 
-async function incrementGroupMessages(ctx: { from?: { id: number }; chat?: { id: number | bigint; type: string } }): Promise<void> {
-  if (!ctx.from || !ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) return;
+/** Preferred language of an existing user (flag selector in the Mini App). */
+async function userLocale(userId: string): Promise<'en' | 'zh'> {
+  const account = await prisma.user.findUnique({ where: { id: userId }, select: { locale: true } });
+  return normalizeLocale(account?.locale);
+}
+
+async function recordGroupActivity(ctx: {
+  from?: { id: number };
+  chat?: { id: number | bigint; type: string; title?: string; username?: string };
+}): Promise<void> {
+  if (!ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) return;
+  await registerTelegramGroup(ctx.chat);
+  if (!ctx.from) return;
   const key = `group:messages:${ctx.chat.id.toString()}:${ctx.from.id}`;
   await redis.incr(key);
   await redis.expire(key, 60 * 60 * 24 * 30);
@@ -21,59 +37,325 @@ async function incrementGroupMessages(ctx: { from?: { id: number }; chat?: { id:
 export function createTelegramBot(): Bot {
   if (!config.botToken) throw new Error('BOT_TOKEN is required to start the Telegram bot');
   const bot = new Bot(config.botToken);
+  registerTelegramBot(bot);
+  // Telegram rejects web_app (Mini App) buttons outside private chats with
+  // BUTTON_TYPE_INVALID and drops the WHOLE message. Every keyboard helper
+  // already picks a t.me deep link for groups; this guard rewrites anything
+  // that slips through anyway, so a group message can never be rejected.
+  installGroupButtonGuard(bot);
+
   bot.use(async (ctx, next) => {
-    try { await incrementGroupMessages(ctx); } catch (error) { console.error('[telegram-message-counter]', error); }
+    try {
+      await recordGroupActivity(ctx);
+    } catch (error) {
+      console.error('[telegram-group-activity]', error);
+    }
     await next();
   });
 
   bot.command('start', async (ctx) => {
-    await ensureWalletForTelegram(telegramIdentity(ctx));
-    await ctx.reply('Welcome to Red Envelope Wallet 🧧\nYour funds are held securely in a custodial ledger. Use /balance to get started.', { parse_mode: 'HTML' });
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const locale = normalizeLocale(user.locale);
+    const texts = botTexts(locale);
+    const payload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
+    // Groups never accept web_app buttons (Telegram answers BUTTON_TYPE_INVALID
+    // and drops the whole message), so the group reply uses a t.me deep link
+    // that opens the bot's private chat, where the wallet buttons live.
+    if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply(texts.startGroup, { reply_markup: chatAppKeyboard(texts.walletGroupButton, ctx.chat.type) });
+      return;
+    }
+    // Arrived through a t.me deep link from a group message. When a BotFather
+    // Mini App short name is configured this hop is skipped and Telegram opens
+    // the Mini App directly with the same start payload.
+    const envelopeId = envelopeIdFromStartPayload(payload);
+    if (envelopeId) {
+      await ctx.reply(texts.openEnvelopePrompt, { reply_markup: miniAppKeyboard(texts.openEnvelopeButton, envelopeAppUrl(envelopeId)) });
+      return;
+    }
+    if (payload === 'history') {
+      await ctx.reply(texts.historyFooter, { reply_markup: miniAppKeyboard(texts.historyButton, historyAppUrl()) });
+      return;
+    }
+    if (payload === 'wallet') {
+      const wallet = await getWalletSummary(user.id);
+      const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
+      await ctx.reply(
+        [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
+        { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+      );
+      return;
+    }
+    const keyboard = new InlineKeyboard()
+      .text('💰 Balance', 'menu:balance').text('📜 History', 'menu:history').row()
+      .text('↓ Deposit', 'menu:deposit').text('↑ Withdraw', 'menu:withdraw').row();
+    if (isTelegramWebAppUrl(config.publicAppUrl)) {
+      keyboard.webApp(texts.walletButton, config.publicAppUrl).row();
+    }
+    keyboard.text('❓ Help', 'menu:help');
+    await ctx.reply(texts.startWelcome(ctx.from?.id), { reply_markup: keyboard });
   });
-  bot.command('help', async (ctx) => ctx.reply(['/balance — view your wallet', '/deposit — get the TRC20 deposit address', '/withdraw — open a withdrawal request', '/history — recent ledger activity', '/redpacket <amount> <count> — create a red envelope in a group'].join('\n')));
+
+  bot.command('help', async (ctx) => ctx.reply([
+    '/wallet — open the Mini App wallet (balance, history, withdrawals); works inside groups too',
+    '/balance — view your wallet',
+    '/deposit — get the TRC20 deposit address',
+    '/withdraw — open a withdrawal request',
+    '/history — recent ledger activity',
+    '/lang en|zh — switch the bot language (English / 中文)',
+    '/myid — show your Telegram ID (used to configure a treasury wallet)',
+    '/registergroup — register this group in the app',
+    '/redpacket <amount> <count> — fund and post a random red envelope in a group'
+  ].join('\n')));
+
+  bot.command('lang', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const [, requested] = (ctx.msg?.text ?? '').trim().split(/\s+/);
+    if (requested !== 'en' && requested !== 'zh') {
+      await ctx.reply(`Current language: ${user.locale === 'zh' ? '中文 🇨🇳' : 'English 🇬🇧'}\n\nUse /lang en for English or /lang zh for 中文. The same choice is available with the flag selector inside the Mini App.`);
+      return;
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { locale: requested } });
+    const texts = botTexts(requested);
+    await ctx.reply(
+      requested === 'zh'
+        ? `✅ 语言已切换为中文 🇨🇳\n\n${texts.walletOpenApp}`
+        : `✅ Language switched to English 🇬🇧\n\n${texts.walletOpenApp}`,
+      { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) }
+    );
+  });
+
+  bot.command('wallet', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const wallet = await getWalletSummary(user.id);
+    const locale = normalizeLocale(user.locale);
+    const texts = botTexts(locale);
+
+    // In a group, never post balance details publicly. The reply carries only
+    // a wallet launcher (a t.me deep link in groups — web_app buttons are
+    // private-chat only); the details go to the user's private chat. This is
+    // how a member opens their wallet right after claiming an envelope.
+    if (ctx.chat && ['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply(texts.groupWalletPrompt, { reply_markup: chatAppKeyboard(texts.walletGroupButton, ctx.chat.type) });
+      try {
+        const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
+        await ctx.api.sendMessage(
+          user.telegramId.toString(),
+          [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
+          { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+        );
+      } catch (dmError) {
+        console.warn('[telegram-wallet-dm] could not message user (they may not have started the bot)', dmError);
+      }
+      return;
+    }
+
+    const testNote = config.fundsMode === 'test' ? `\n\n⚠️ ${texts.testCurrencyWarning}` : '';
+    await ctx.reply(
+      [texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)), '', texts.walletOpenApp].join('\n') + testNote,
+      { reply_markup: miniAppKeyboard(texts.walletDetailsButton) }
+    );
+  });
+
+  bot.command('myid', async (ctx) => {
+    if (!ctx.from) return;
+    await ctx.reply(`Your Telegram ID is: <code>${ctx.from.id}</code>`, { parse_mode: 'HTML' });
+  });
+
+  bot.command('registergroup', async (ctx) => {
+    if (!ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply('Run /registergroup inside the Telegram group where envelopes should be posted.');
+      return;
+    }
+    // const group = await registerTelegramGroup(ctx.chat);
+    // await ctx.reply(`✅ Group registered\n${group?.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`, { parse_mode: 'HTML' });
+    await registerTelegramGroup(ctx.chat);
+
+    await ctx.reply(
+      `✅ Group registered\n${ctx.chat.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`,
+      { parse_mode: 'HTML' }
+    );
+  });
+
   bot.command('balance', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const wallet = await getWalletSummary(user.id);
-    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked: ${formatMinor(wallet.lockedMinor)} USDT`);
+    await ctx.reply(`💳 Available: ${formatMinor(wallet.availableMinor)} USDT\n🔒 Locked/pending withdrawal: ${formatMinor(wallet.lockedMinor)} USDT`);
   });
+
   bot.command('deposit', async (ctx) => {
-    await ensureWalletForTelegram(telegramIdentity(ctx));
-    await ctx.reply(`Send USDT on TRC20 to:\n<code>${config.tron.hotWalletAddress || 'Deposit address is being provisioned'}</code>\n\nDeposits are credited after ${config.tron.confirmations} confirmations. Always verify the network.`, { parse_mode: 'HTML' });
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    if (config.fundsMode !== 'real') {
+      await ctx.reply('Test mode is active. Blockchain deposits are disabled; ask an administrator to add test USDT.');
+      return;
+    }
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } });
+    await ctx.reply(
+      account?.depositAddress
+        ? `Send only USDT on TRC20 to your assigned address:\n<code>${account.depositAddress}</code>\n\nDeposits are credited after ${config.tron.confirmations} confirmations.`
+        : 'Your unique deposit address has not been provisioned. Contact support.',
+      { parse_mode: 'HTML' }
+    );
   });
+
   bot.command('withdraw', async (ctx) => {
-    const keyboard = new InlineKeyboard().url('Open Wallet', config.publicAppUrl);
-    await ctx.reply('Open your wallet to submit a TRC20 withdrawal. Minimum and network fee are shown before confirmation.', { reply_markup: keyboard });
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const texts = botTexts(normalizeLocale(user.locale));
+    const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
+    if (mode === 'disabled') {
+      await ctx.reply(texts.withdrawDisabled);
+      return;
+    }
+    const keyboard = chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type);
+    if (mode === 'test') {
+      await ctx.reply(
+        [
+          texts.withdrawTest(config.withdrawal.testWithdrawalAddress ?? '', (config.withdrawal.minMinor / 1_000_000n).toString(), (config.withdrawal.feeMinor / 1_000_000n).toString()),
+          '',
+          `⚠️ ${texts.testCurrencyWarning}`
+        ].join('\n'),
+        { reply_markup: keyboard }
+      );
+      return;
+    }
+    await ctx.reply(texts.withdrawReal, { reply_markup: keyboard });
   });
+
   bot.command('history', async (ctx) => {
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     const ledger = await getLedger(user.id, 10);
-    if (!ledger.length) { await ctx.reply('No ledger activity yet.'); return; }
-    const lines = ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`);
-    await ctx.reply(lines.join('\n'));
+    const texts = botTexts(normalizeLocale(user.locale));
+    const keyboard = chatAppKeyboard(texts.historyButton, ctx.chat?.type, historyAppUrl(), historyDeepLink());
+    if (!ledger.length) {
+      await ctx.reply(texts.historyEmpty, { reply_markup: keyboard });
+      return;
+    }
+    const lines = ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) =>
+      `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`
+    );
+    await ctx.reply([lines.join('\n'), '', texts.historyFooter].join('\n'), { reply_markup: keyboard });
   });
+
   bot.command('redpacket', async (ctx) => {
-    if (!ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) { await ctx.reply('Create red envelopes from a group chat.'); return; }
+    if (!ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) {
+      await ctx.reply('Create red envelopes from a group chat.');
+      return;
+    }
     const [, amount, countRaw] = (ctx.msg?.text ?? '').trim().split(/\s+/);
     const count = Number(countRaw);
-    if (!amount || !Number.isInteger(count) || count < 1 || count > 500) { await ctx.reply('Usage: /redpacket <amount in USDT> <number of slots>'); return; }
+    if (!amount || !Number.isInteger(count) || count < 1 || count > 500) {
+      await ctx.reply('Usage: /redpacket <amount in USDT> <number of claims>\nExample: /redpacket 10 5');
+      return;
+    }
     const user = await ensureWalletForTelegram(telegramIdentity(ctx));
     try {
-      const envelope = await createEnvelope(user.id, { total: amount, count, mode: 'RANDOM', groupId: ctx.chat.id.toString(), expiresInMinutes: 24 * 60, messageId: ctx.msg?.message_id });
-      const keyboard = new InlineKeyboard().text('🧧 Claim Red Envelope', envelope.envelope.id);
-      await ctx.reply(`🧧 Red Envelope\nTotal: ${formatMinor(envelope.envelope.totalMinor)} USDT\nSlots: ${count}\nTap to claim — each person can claim once.`, { reply_markup: keyboard });
-    } catch (error) { await ctx.reply(error instanceof Error ? error.message : 'Unable to create red envelope.'); }
+      await createAndPublishEnvelope(user.id, {
+        total: amount,
+        count,
+        mode: 'RANDOM',
+        groupId: ctx.chat.id.toString(),
+        expiresInMinutes: 24 * 60
+      });
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Unable to create red envelope.');
+    }
   });
+
+  bot.callbackQuery('menu:balance', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const wallet = await getWalletSummary(user.id);
+    const texts = botTexts(normalizeLocale(user.locale));
+    await ctx.answerCallbackQuery();
+    await ctx.reply(texts.walletDetails(formatMinor(wallet.availableMinor), formatMinor(wallet.lockedMinor)));
+  });
+  bot.callbackQuery('menu:history', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const ledger = await getLedger(user.id, 10);
+    const texts = botTexts(normalizeLocale(user.locale));
+    await ctx.answerCallbackQuery();
+    const summary = ledger.length ? ledger.map((entry: { direction: string; amountMinor: bigint; type: string; createdAt: Date }) => `${entry.direction === 'CREDIT' ? '+' : '-'}${formatMinor(entry.amountMinor)} USDT · ${entry.type} · ${entry.createdAt.toISOString().slice(0, 10)}`).join('\n') : texts.historyEmpty;
+    await ctx.reply([summary, '', texts.historyFooter].join('\n'), { reply_markup: miniAppKeyboard(texts.historyButton, historyAppUrl()) });
+  });
+  bot.callbackQuery('menu:deposit', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    await ctx.answerCallbackQuery();
+    if (config.fundsMode !== 'real') {
+      await ctx.reply('Test mode is active. Blockchain deposits and withdrawals are disabled; ask an administrator to add test USDT.');
+      return;
+    }
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { depositAddress: true } });
+    await ctx.reply(account?.depositAddress ? `Send only USDT TRC20 to your assigned address:\n<code>${account.depositAddress}</code>\n\nCredit requires ${config.tron.confirmations} confirmations.` : 'Your unique deposit address has not been provisioned. Contact support.', { parse_mode: 'HTML' });
+  });
+  bot.callbackQuery('menu:help', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Use Balance and History to inspect your internal USDT ledger. Open Wallet to create envelopes or request a withdrawal. Never share a seed phrase or private key—the bot will never ask for one.');
+  });
+  bot.callbackQuery('menu:withdraw', async (ctx) => {
+    const user = await ensureWalletForTelegram(telegramIdentity(ctx));
+    const texts = botTexts(normalizeLocale(user.locale));
+    await ctx.answerCallbackQuery();
+    const mode = resolveWithdrawalMode({ fundsMode: config.fundsMode, testWithdrawalAddress: config.withdrawal.testWithdrawalAddress });
+    if (mode === 'disabled') {
+      await ctx.reply(texts.withdrawDisabledShort);
+      return;
+    }
+    if (mode === 'test') {
+      await ctx.reply(
+        `${texts.withdrawTestShort(config.withdrawal.testWithdrawalAddress ?? '')}\n\n⚠️ ${texts.testCurrencyWarning}`,
+        { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) }
+      );
+      return;
+    }
+    await ctx.reply(texts.withdrawReal, { reply_markup: chatAppKeyboard(texts.walletDetailsButton, ctx.chat?.type) });
+  });
+
   bot.callbackQuery(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i, async (ctx) => {
     const envelopeId = ctx.callbackQuery.data;
     try {
       const user = await ensureWalletForTelegram(telegramIdentity(ctx));
-      const result = await claimEnvelope(user.id, envelopeId);
-      if (result.kind === 'claimed') await ctx.answerCallbackQuery(`You claimed ${formatMinor(result.claim.amountMinor)} USDT!`);
-      else await ctx.answerCallbackQuery('This envelope is no longer available.');
+      const envelope = await getEnvelope(envelopeId);
+      await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
+      const locale = await userLocale(user.id);
+      const texts = botTexts(locale);
+      const openLink = envelopeDeepLink(envelopeId);
+
+      await ctx.answerCallbackQuery(openLink
+        ? { text: texts.openEnvelopeAlert, url: openLink }
+        : { text: texts.openEnvelopeAlert, show_alert: true });
+
+      // Old envelope messages may still have callback buttons from a previous
+      // deployment. Do not claim from the callback anymore; direct the user to
+      // the Mini App so they see the sealed envelope, tap the gold seal, then
+      // watch the opening animation before the amount is revealed.
+      try {
+        await ctx.api.sendMessage(
+          user.telegramId.toString(),
+          texts.openEnvelopePrompt,
+          { reply_markup: miniAppKeyboard(texts.openEnvelopeButton, envelopeAppUrl(envelopeId)) }
+        );
+      } catch (dmError) {
+        console.warn('[telegram-open-envelope-dm] could not message user (they may not have started the bot)', dmError);
+      }
     } catch (error) {
-      await ctx.answerCallbackQuery(error instanceof Error ? error.message.slice(0, 190) : 'Unable to claim');
+      await ctx.answerCallbackQuery({
+        text: error instanceof Error ? error.message.slice(0, 190) : 'Unable to open envelope',
+        show_alert: true
+      });
     }
   });
-  bot.catch((error) => console.error('[telegram-bot]', error.error));
+
+  bot.catch(async (botError) => {
+    console.error('[telegram-bot]', botError.error);
+    if (!(botError.error instanceof AppError)) return;
+    try {
+      if (botError.ctx.callbackQuery) {
+        await botError.ctx.answerCallbackQuery({ text: botError.error.message.slice(0, 190), show_alert: true });
+      } else {
+        await botError.ctx.reply(botError.error.message);
+      }
+    } catch (replyError) {
+      console.error('[telegram-bot-error-reply]', replyError);
+    }
+  });
   return bot;
 }

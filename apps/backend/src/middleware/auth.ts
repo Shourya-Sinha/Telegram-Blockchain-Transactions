@@ -45,7 +45,7 @@ export async function telegramAuth(req: Request, _res: Response, next: NextFunct
       create: { telegramId: identity.telegramId, username: identity.username, firstName: identity.firstName, wallet: { create: {} } }
     });
     if (user.status === 'BANNED') throw new AppError(403, 'This Telegram account is banned', 'BANNED');
-    req.telegramUser = { id: user.id, telegramId: user.telegramId, username: user.username ?? undefined, firstName: user.firstName, createdAt: user.createdAt, isAdmin: user.isAdmin, status: user.status };
+    req.telegramUser = { id: user.id, telegramId: user.telegramId, username: user.username ?? undefined, firstName: user.firstName, locale: user.locale, createdAt: user.createdAt, isAdmin: user.isAdmin, status: user.status };
     next();
   } catch (error) { next(error); }
 }
