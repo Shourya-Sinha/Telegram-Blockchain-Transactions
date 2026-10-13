@@ -14,10 +14,12 @@ assertProductionConfig();
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: (origin, callback) => {
-  if (!origin || config.corsOrigins.includes(origin) || config.nodeEnv !== 'production') { callback(null, true); return; }
-  callback(new Error('Origin not allowed by CORS'));
-}, credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || config.corsOrigins.includes(origin) || config.nodeEnv !== 'production') { callback(null, true); return; }
+    callback(new Error('Origin not allowed by CORS'));
+  }, credentials: true
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'));
 
@@ -47,14 +49,75 @@ const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
 };
 app.use(errorHandler);
 
+// if (config.nodeEnv !== 'test') {
+//   startWorkers();
+//   const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
+//   if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
+//     void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
+//   }
+//   const shutdown = () => { server.close(() => process.exit(0)); };
+//   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
+// }
+
 if (config.nodeEnv !== 'test') {
-  startWorkers();
-  const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
-  if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
-    void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
+  async function startServer() {
+    // Initialize Grammy before accepting webhook updates.
+    // if (bot) {
+    //   await bot.init();
+    //   console.log('[telegram] bot initialized');
+    // }
+
+    if (bot) {
+      await bot.init();
+      console.log('[telegram] bot initialized');
+
+      try {
+        await bot.api.setChatMenuButton({
+          menu_button: {
+            type: 'web_app',
+            text: 'Open Wallet',
+            web_app: {
+              url: config.publicAppUrl,
+            },
+          },
+        });
+        console.log('[telegram] wallet menu button configured');
+      } catch (error) {
+        console.error('[telegram-menu-button]', error);
+      }
+    }
+
+
+    startWorkers();
+
+    const server = app.listen(config.port, '0.0.0.0', () => {
+      console.log(`[backend] listening on 0.0.0.0:${config.port}`);
+    });
+
+    if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
+      try {
+        await bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, {
+          secret_token: config.telegramWebhookSecret,
+        });
+        console.log('[telegram] webhook configured');
+      } catch (error) {
+        console.error('[telegram-webhook]', error);
+      }
+    }
+
+    const shutdown = () => {
+      server.close(() => process.exit(0));
+    };
+
+    process.once('SIGTERM', shutdown);
+    process.once('SIGINT', shutdown);
   }
-  const shutdown = () => { server.close(() => process.exit(0)); };
-  process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
+
+  void startServer().catch((error) => {
+    console.error('[backend-startup-error]', error);
+    process.exitCode = 1;
+  });
 }
+
 
 export { app };
