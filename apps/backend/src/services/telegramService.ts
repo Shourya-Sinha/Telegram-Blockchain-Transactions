@@ -149,16 +149,64 @@ export function rewriteGroupWebAppButtons<T>(payload: T, deepLink: string | unde
  * message again, the button is converted to a t.me deep link before the
  * request reaches Telegram, so users always receive the message.
  */
+// export function installGroupButtonGuard(bot: Bot): void {
+//   bot.api.config.use((prev, method, payload, signal) => {
+//     const patched = rewriteGroupWebAppButtons(payload, walletDeepLink());
+//     if (patched !== payload) {
+//       console.warn(`[telegram-button-guard] ${method}: web_app button aimed at a group was converted to a t.me deep link`);
+//     }
+//     return prev(method, patched, signal);
+//   });
+//   console.log('[telegram] group button guard active — web_app buttons cannot reach group messages');
+// }
+
 export function installGroupButtonGuard(bot: Bot): void {
   bot.api.config.use((prev, method, payload, signal) => {
-    const patched = rewriteGroupWebAppButtons(payload, walletDeepLink());
-    if (patched !== payload) {
-      console.warn(`[telegram-button-guard] ${method}: web_app button aimed at a group was converted to a t.me deep link`);
+    const candidate = payload as unknown as {
+      chat_id?: string | number;
+      reply_markup?: {
+        inline_keyboard?: Array<Array<Record<string, unknown>>>;
+      };
+    };
+
+    // Only inspect requests that target a group or supergroup.
+    // This prevents accessing bot.botInfo during getMe initialization.
+    if (
+      candidate.chat_id === undefined ||
+      !(Number(candidate.chat_id) < 0)
+    ) {
+      return prev(method, payload, signal);
     }
+
+    const keyboard = candidate.reply_markup?.inline_keyboard;
+    const hasWebAppButton = keyboard?.some((row) =>
+      row.some((button) => "web_app" in button)
+    );
+
+    // Leave ordinary group messages unchanged.
+    if (!hasWebAppButton) {
+      return prev(method, payload, signal);
+    }
+
+    const patched = rewriteGroupWebAppButtons(
+      payload,
+      walletDeepLink()
+    );
+
+    if (patched !== payload) {
+      console.warn(
+        `[telegram-button-guard] ${method}: web_app button aimed at a group was converted to a t.me deep link`
+      );
+    }
+
     return prev(method, patched, signal);
   });
-  console.log('[telegram] group button guard active — web_app buttons cannot reach group messages');
+
+  console.log(
+    "[telegram] group button guard active — web_app buttons cannot reach group messages"
+  );
 }
+
 
 type PublishableEnvelope = {
   id: string;
