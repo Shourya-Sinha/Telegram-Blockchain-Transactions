@@ -11,8 +11,8 @@ A red envelope is a prepaid distribution of the app's **internal USDT balance**:
 1. A sender chooses a total amount, a number of claims, a Telegram group, and a distribution mode.
 2. The server immediately debits the entire total from the sender's internal wallet.
 3. The bot posts a message and **Claim red envelope** button in that group.
-4. Each eligible Telegram member can tap once.
-5. The server credits that member's internal wallet in one database transaction.
+4. The selected audience (or any verified group member, if chosen) can tap once.
+5. The server checks audience access and credits that member's internal wallet in one database transaction.
 6. When all claims are used, the envelope is complete. When it expires, every unclaimed minor unit is refunded to the sender.
 
 Claims are off-chain ledger transfers. The app does **not** send a TRC20 transaction for every claim. Tron is used only for deposits into and withdrawals out of the custodial system.
@@ -72,25 +72,20 @@ Run `/myid` from the Telegram account that should pay for admin envelopes, copy 
 
 For every destination group:
 
-1. Open the group in Telegram.
-2. Add the bot as a member.
-3. Promote the bot to group administrator. It needs permission to send and edit messages. Admin status also makes membership verification reliable.
-4. In that group, run:
+1. Open the group in Telegram and add the bot.
+2. Promote the bot to group administrator. It needs permission to send/edit messages; admin status also makes membership verification reliable.
+3. The bot records the group title and numeric ID when Telegram sends the bot-added update. If it does not appear, run `/registergroup` in that group; the bot replies with the group title and ID.
+4. Open **Admin → Groups & members** to see the group card (name + ID) and the member profiles observed by the bot. **Send envelope** and **Group settings** also use the registered group list.
 
-   ```text
-   /registergroup
-   ```
+The new `GroupMember` and envelope-audience tables are in the included Prisma migration. Apply it before using this feature (`npm run db:migrate` for a local database; Docker runs `prisma migrate deploy` at backend startup), then regenerate the client if your workflow does not do so automatically (`npm run db:generate`).
 
-5. The bot replies with the group title and numeric ID.
-6. Open **Admin → Group settings** or **Admin → Send envelope**. The named group should now appear; no manual opaque ID is required.
+### What the member directory can and cannot show
 
-The bot also refreshes the group title and `lastSeenAt` whenever it receives group activity.
+Telegram's Bot API does not let a bot download a complete or historical member list, nor does it provide a member's phone number. The directory stores public profile fields Telegram includes in updates (Telegram ID, first/last name, username, language, Premium/bot flags, observed messages, and first/last seen). It begins filling after the bot is added and receives updates; it cannot backfill members who have never appeared in an update. A phone number is available only if that person explicitly shares their contact with the bot.
 
-### Message-count rules
+For ordinary group messages to populate the roster and message counts, make the bot an administrator or disable its privacy mode through BotFather (`/setprivacy`). With privacy mode enabled, Telegram generally sends only commands, bot-directed messages, and service updates. Membership is checked with Telegram again when someone actually claims.
 
-If `Minimum group messages` is greater than zero, disable the bot's privacy mode through BotFather (`/setprivacy`) so it receives ordinary group messages. With privacy mode enabled Telegram generally sends only commands and bot-directed updates, so the counter cannot represent all messages.
-
-Counters are retained in Redis for 30 days. Account age means time since the user's first verified interaction with this wallet, not the age of their Telegram account.
+Message-count counters used by claim policies are retained in Redis for 30 days. Account age means time since the user's first verified interaction with this wallet, not the age of their Telegram account.
 
 ## 5. Prepare and fund the treasury
 
@@ -151,8 +146,8 @@ Before real funds are accepted, implement unique deposit-address provisioning (o
 ## 6. Send from the admin console
 
 1. Sign in to the admin frontend with the seeded admin credentials.
-2. Open **Send envelope**.
-3. Select a registered group by name.
+2. Open **Send envelope** and select the destination group by name (the group ID is shown too).
+3. Choose the claim audience. **Selected members only** is the safe default: manually tick the observed member profiles that may claim. The picker supports search and paging. Only those Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
 4. Enter total USDT, number of claims, random/equal mode, and expiry.
 5. Confirm that the treasury balance covers the total.
 6. Click **Send to Telegram group**.

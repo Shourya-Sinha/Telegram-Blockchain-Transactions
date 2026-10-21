@@ -84,79 +84,8 @@ const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
 };
 app.use(errorHandler);
 
-<<<<<<< HEAD
-// if (config.nodeEnv !== 'test') {
-//   startWorkers();
-//   const server = app.listen(config.port, '0.0.0.0', () => console.log(`[backend] listening on 0.0.0.0:${config.port}`));
-//   if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
-//     void bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, { secret_token: config.telegramWebhookSecret }).then(() => console.log('[telegram] webhook configured')).catch((error) => console.error('[telegram-webhook]', error));
-//   }
-//   const shutdown = () => { server.close(() => process.exit(0)); };
-//   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
-// }
+const telegramAllowedUpdates = ['message', 'callback_query', 'my_chat_member', 'chat_member'] as const;
 
-if (config.nodeEnv !== 'test') {
-  async function startServer() {
-    // Initialize Grammy before accepting webhook updates.
-    // if (bot) {
-    //   await bot.init();
-    //   console.log('[telegram] bot initialized');
-    // }
-
-    if (bot) {
-      await bot.init();
-      console.log('[telegram] bot initialized');
-
-      try {
-        await bot.api.setChatMenuButton({
-          menu_button: {
-            type: 'web_app',
-            text: 'Open Wallet',
-            web_app: {
-              url: config.publicAppUrl,
-            },
-          },
-        });
-        console.log('[telegram] wallet menu button configured');
-      } catch (error) {
-        console.error('[telegram-menu-button]', error);
-      }
-    }
-
-
-    startWorkers();
-
-    const server = app.listen(config.port, '0.0.0.0', () => {
-      console.log(`[backend] listening on 0.0.0.0:${config.port}`);
-    });
-
-    if (bot && process.env.TELEGRAM_WEBHOOK_URL) {
-      try {
-        await bot.api.setWebhook(process.env.TELEGRAM_WEBHOOK_URL, {
-          secret_token: config.telegramWebhookSecret,
-        });
-        console.log('[telegram] webhook configured');
-      } catch (error) {
-        console.error('[telegram-webhook]', error);
-      }
-    }
-
-    const shutdown = () => {
-      server.close(() => process.exit(0));
-    };
-
-    process.once('SIGTERM', shutdown);
-    process.once('SIGINT', shutdown);
-  }
-
-  void startServer().catch((error) => {
-    console.error('[backend-startup-error]', error);
-    process.exitCode = 1;
-  });
-}
-
-
-=======
 function isPublicTelegramWebhook(value: string): boolean {
   if (!value) return false;
   try {
@@ -216,7 +145,8 @@ if (config.nodeEnv !== 'test') {
 
       if (isPublicTelegramWebhook(config.telegramWebhookUrl)) {
         await bot.api.setWebhook(config.telegramWebhookUrl, {
-          secret_token: config.telegramWebhookSecret
+          secret_token: config.telegramWebhookSecret,
+          allowed_updates: [...telegramAllowedUpdates]
         });
         console.log(`[telegram] webhook configured: ${config.telegramWebhookUrl}`);
       } else {
@@ -225,7 +155,7 @@ if (config.nodeEnv !== 'test') {
         await bot.api.deleteWebhook();
         polling = true;
         console.log('[telegram] local/non-public webhook URL detected; using long polling');
-        void bot.start().catch((error) => console.error('[telegram-polling]', error));
+        void bot.start({ allowed_updates: telegramAllowedUpdates }).catch((error) => console.error('[telegram-polling]', error));
       }
     } catch (error) {
       console.error('[telegram] startup failed', error);
@@ -255,5 +185,4 @@ if (config.nodeEnv !== 'test') {
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
 }
->>>>>>> df91f7c9527f593fb78c9ce2025ccff02e7bb2dc
 export { app };
