@@ -67,8 +67,10 @@ export const createEnvelopeSchema = z.object({
   total: z.string().regex(/^\d+(\.\d{1,6})?$/),
   count: z.number().int().min(1).max(500),
   mode: envelopeModeSchema.default('RANDOM'),
-  groupId: z.string().regex(/^-?\d+$/),
-  expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(24 * 60)
+  groupId: z.string().max(20).regex(/^-?\d+$/),
+  expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(24 * 60),
+  audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
+  eligibleTelegramIds: z.array(z.string().max(16).regex(/^\d+$/)).max(5000).default([])
 });
 
 export const apiErrorSchema = z.object({ error: z.string(), code: z.string().optional() });

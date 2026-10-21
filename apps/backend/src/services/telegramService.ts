@@ -166,6 +166,7 @@ type PublishableEnvelope = {
   totalMinor: bigint;
   totalSlots: number;
   mode: string;
+  audience?: string;
   expiresAt: Date;
   sender?: { firstName?: string | null } | null;
 };
@@ -228,7 +229,9 @@ export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Pro
       `Claims · 份数: ${envelope.totalSlots} · ${mode}`,
       `Expires · 过期: ${envelope.expiresAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`,
       '',
-      'Tap below to open it. Each Telegram account can claim once. · 点击下方按钮领取，每个账号限领一次。'
+      envelope.audience === 'SELECTED'
+        ? 'Only selected group members can claim this envelope. · 仅被选中的群成员可领取。'
+        : 'Tap below to open it. Each Telegram account can claim once. · 点击下方按钮领取，每个账号限领一次。'
     ].join('\n'),
     { reply_markup: keyboard }
   );

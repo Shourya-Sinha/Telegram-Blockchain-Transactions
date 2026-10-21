@@ -38,6 +38,11 @@ enum EnvelopeStatus {
   REFUNDED
 }
 
+enum EnvelopeAudience {
+  ALL
+  SELECTED
+}
+
 enum Chain {
   TRC20
 }
@@ -120,10 +125,12 @@ model RedEnvelope {
   remainingSlots Int
   mode           EnvelopeMode
   status         EnvelopeStatus   @default(ACTIVE)
+  audience       EnvelopeAudience @default(ALL)
   expiresAt      DateTime
   createdAt      DateTime        @default(now())
   sender         User            @relation("EnvelopeSender", fields: [senderId], references: [id], onDelete: Restrict)
   claims         RedEnvelopeClaim[]
+  eligibleUsers  RedEnvelopeEligibleUser[]
   @@index([groupId, createdAt])
   @@index([status, expiresAt])
 }
@@ -210,4 +217,40 @@ model GroupSetting {
   minAccountAgeDays Int      @default(0)
   minMessages       Int      @default(0)
   maxClaimsPerDay   Int      @default(10)
+  members           GroupMember[]
+}
+
+/** A Telegram profile observed in group updates; phone numbers are not available from the Bot API. */
+model GroupMember {
+  id           String      @id @default(uuid()) @db.Uuid
+  chatId       BigInt
+  telegramId   BigInt
+  username     String?
+  firstName    String
+  lastName     String?
+  languageCode String?
+  isBot        Boolean     @default(false)
+  isPremium    Boolean     @default(false)
+  messageCount Int         @default(0)
+  firstSeenAt  DateTime    @default(now())
+  lastSeenAt   DateTime    @default(now())
+  lastMessageAt DateTime?
+  isMember     Boolean     @default(true)
+  leftAt       DateTime?
+  group        GroupSetting @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  @@unique([chatId, telegramId])
+  @@index([chatId, isMember, lastSeenAt])
+  @@index([telegramId])
+}
+
+/** Snapshot of Telegram IDs allowed to claim a selected-audience envelope. */
+model RedEnvelopeEligibleUser {
+  envelopeId String      @db.Uuid
+  telegramId BigInt
+  createdAt  DateTime    @default(now())
+  envelope   RedEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@id([envelopeId, telegramId])
+  @@index([telegramId])
 }

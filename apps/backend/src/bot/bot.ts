@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma';
 import { getLedger, getWalletSummary, ensureWalletForTelegram } from '../services/ledgerService';
 import { getEnvelope } from '../services/envelopeService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
-import { registerTelegramGroup } from '../services/groupService';
+import { markTelegramGroupMemberLeft, recordTelegramGroupMember, registerTelegramGroup, type TelegramGroupMemberProfile } from '../services/groupService';
 import { assertTelegramGroupMembership, chatAppKeyboard, envelopeAppUrl, envelopeDeepLink, envelopeIdFromStartPayload, historyAppUrl, historyDeepLink, installGroupButtonGuard, isTelegramWebAppUrl, miniAppKeyboard, registerTelegramBot } from '../services/telegramService';
 import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
@@ -23,15 +23,47 @@ async function userLocale(userId: string): Promise<'en' | 'zh'> {
 }
 
 async function recordGroupActivity(ctx: {
-  from?: { id: number };
+  from?: TelegramGroupMemberProfile;
   chat?: { id: number | bigint; type: string; title?: string; username?: string };
+  message?: {
+    new_chat_members?: TelegramGroupMemberProfile[];
+    left_chat_member?: TelegramGroupMemberProfile;
+  };
+  chatMember?: {
+    new_chat_member: { user: TelegramGroupMemberProfile; status: string; is_member?: boolean };
+  };
 }): Promise<void> {
   if (!ctx.chat || !['group', 'supergroup'].includes(ctx.chat.type)) return;
   await registerTelegramGroup(ctx.chat);
-  if (!ctx.from) return;
-  const key = `group:messages:${ctx.chat.id.toString()}:${ctx.from.id}`;
-  await redis.incr(key);
-  await redis.expire(key, 60 * 60 * 24 * 30);
+
+  // Join/leave service messages let us keep the observed roster reasonably
+  // current, even when the member has not started a wallet yet.
+  for (const member of ctx.message?.new_chat_members ?? []) {
+    await recordTelegramGroupMember(ctx.chat, member);
+  }
+  if (ctx.from && !ctx.from.is_bot) {
+    const isMessage = Boolean(ctx.message);
+    await recordTelegramGroupMember(ctx.chat, ctx.from, isMessage);
+    if (isMessage) {
+      const key = `group:messages:${ctx.chat.id.toString()}:${ctx.from.id}`;
+      await redis.incr(key);
+      await redis.expire(key, 60 * 60 * 24 * 30);
+    }
+  }
+  const updatedMember = ctx.chatMember?.new_chat_member;
+  if (updatedMember) {
+    const stillInGroup = updatedMember.status !== 'left'
+      && updatedMember.status !== 'kicked'
+      && (updatedMember.status !== 'restricted' || updatedMember.is_member === true);
+    if (stillInGroup) await recordTelegramGroupMember(ctx.chat, updatedMember.user);
+    else await markTelegramGroupMemberLeft(ctx.chat, updatedMember.user);
+  }
+
+  // Apply leave state last because the departing user can be ctx.from on their
+  // service message; otherwise the normal upsert above would mark them active.
+  if (ctx.message?.left_chat_member) {
+    await markTelegramGroupMemberLeft(ctx.chat, ctx.message.left_chat_member);
+  }
 }
 
 export function createTelegramBot(): Bot {

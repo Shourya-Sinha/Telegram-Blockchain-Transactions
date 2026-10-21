@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { claimEnvelope, getEnvelope } from '../services/envelopeService';
+import { assertEnvelopeAudience } from '../services/eligibilityService';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
 import { assertTelegramGroupMembership, isTelegramGroupMember, refreshEnvelopeMessageKeyboard } from '../services/telegramService';
@@ -94,7 +95,7 @@ userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (
     total: z.string().regex(/^\d+(\.\d{1,6})?$/),
     count: z.number().int().min(1).max(500),
     mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
-    groupId: z.string().regex(/^-?\d+$/),
+    groupId: z.string().max(20).regex(/^-?\d+$/),
     expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440)
   }).parse(req.body);
   await assertTelegramGroupMembership(BigInt(payload.groupId), req.telegramUser!.telegramId);
@@ -107,6 +108,7 @@ userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
   const user = req.telegramUser!;
   const isHistoryParticipant = envelope.senderId === user.id || envelope.claims.some((claim: { userId: string }) => claim.userId === user.id);
   if (!isHistoryParticipant) await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
+  await assertEnvelopeAudience(user.id, envelope.id, true);
   // Flag which claim belongs to the viewer so the Mini App can reopen an
   // already-opened envelope straight to its detail view, exactly like WeChat.
   // Internal user ids are not exposed — only the display name of each claimer.

@@ -10,5 +10,7 @@ export type EnvelopeMode = 'RANDOM' | 'EQUAL';
 export const EnvelopeMode = { RANDOM: 'RANDOM', EQUAL: 'EQUAL' } as const;
 export type EnvelopeStatus = 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'REFUNDED';
 export const EnvelopeStatus = { ACTIVE: 'ACTIVE', COMPLETED: 'COMPLETED', EXPIRED: 'EXPIRED', REFUNDED: 'REFUNDED' } as const;
+export type EnvelopeAudience = 'ALL' | 'SELECTED';
+export const EnvelopeAudience = { ALL: 'ALL', SELECTED: 'SELECTED' } as const;
 export type WithdrawalStatus = 'QUEUED' | 'PROCESSING' | 'BROADCAST' | 'CONFIRMING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
 export const WithdrawalStatus = { QUEUED: 'QUEUED', PROCESSING: 'PROCESSING', BROADCAST: 'BROADCAST', CONFIRMING: 'CONFIRMING', COMPLETED: 'COMPLETED', FAILED: 'FAILED', REJECTED: 'REJECTED' } as const;

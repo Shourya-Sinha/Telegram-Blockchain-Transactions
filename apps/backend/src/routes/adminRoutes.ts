@@ -52,7 +52,7 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   const recent = await prisma.redEnvelope.findMany({
     include: {
       sender: { select: { telegramId: true, firstName: true, username: true } },
-      _count: { select: { claims: true } }
+      _count: { select: { claims: true, eligibleUsers: true } }
     },
     orderBy: { createdAt: 'desc' },
     take: 25
@@ -73,13 +73,57 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   }));
 }));
 
+adminRouter.get('/groups', asyncHandler(async (_req, res) => {
+  res.json(jsonSafe(await listRegisteredGroups()));
+}));
+
+adminRouter.get('/groups/:chatId/members', asyncHandler(async (req, res) => {
+  const chatIdText = z.string().max(20).regex(/^-?\d+$/).parse(String(req.params.chatId));
+  const query = z.object({
+    search: z.string().trim().max(100).optional(),
+    offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    activeOnly: z.enum(['true', 'false']).default('false')
+  }).parse(req.query);
+  const chatId = BigInt(chatIdText);
+  const group = await prisma.groupSetting.findUnique({ where: { chatId } });
+  if (!group) throw new AppError(404, 'Telegram group not found', 'GROUP_NOT_FOUND');
+  const search = query.search ?? '';
+  const numericTelegramId = /^\d+$/.test(search) && BigInt(search) <= 9_223_372_036_854_775_807n;
+  const where = {
+    chatId,
+    ...(query.activeOnly === 'true' ? { isMember: true, isBot: false } : {}),
+    ...(search ? {
+      OR: numericTelegramId
+        ? [{ telegramId: BigInt(search) }]
+        : [
+          { firstName: { contains: search, mode: 'insensitive' as const } },
+          { lastName: { contains: search, mode: 'insensitive' as const } },
+          { username: { contains: search, mode: 'insensitive' as const } }
+        ]
+    } : {})
+  };
+  const [total, members] = await Promise.all([
+    prisma.groupMember.count({ where }),
+    prisma.groupMember.findMany({
+      where,
+      orderBy: [{ isMember: 'desc' }, { lastSeenAt: 'desc' }],
+      skip: query.offset,
+      take: query.limit
+    })
+  ]);
+  res.json(jsonSafe({ group, total, offset: query.offset, limit: query.limit, members }));
+}));
+
 adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
   const payload = z.object({
     total: z.string().regex(/^\d+(\.\d{1,6})?$/),
     count: z.number().int().min(1).max(500),
     mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
-    groupId: z.string().regex(/^-?\d+$/),
-    expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440)
+    groupId: z.string().max(20).regex(/^-?\d+$/),
+    expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440),
+    audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
+    eligibleTelegramIds: z.array(z.string().max(16).regex(/^\d+$/)).max(5000).default([])
   }).parse(req.body);
   if (!/^\d+$/.test(config.redEnvelope.treasuryTelegramId)) {
     throw new AppError(503, 'RED_ENVELOPE_TREASURY_TELEGRAM_ID is not configured', 'TREASURY_NOT_CONFIGURED');

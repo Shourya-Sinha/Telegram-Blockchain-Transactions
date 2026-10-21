@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
+import { EnvelopeAudience, EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
 import { createEnvelopeSchema, parseUsdtToMinor } from '@red-envelope/shared';
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
@@ -7,6 +7,7 @@ import { AppError, isPrismaUniqueError } from '../utils/errors';
 import { assertClaimEligibility } from './eligibilityService';
 import { creditWallet, debitWallet, type Transaction, writeAudit } from './ledgerService';
 import { randomClaimAmount } from '../utils/envelopeAllocation';
+import { isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds } from '../utils/envelopeAudience';
 
 export type CreateEnvelopeInput = {
   total: string;
@@ -14,6 +15,8 @@ export type CreateEnvelopeInput = {
   mode: 'RANDOM' | 'EQUAL';
   groupId: string;
   expiresInMinutes: number;
+  audience?: 'ALL' | 'SELECTED';
+  eligibleTelegramIds?: string[];
   messageId?: number;
   ipAddress?: string;
   actorId?: string;
@@ -27,6 +30,24 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
   const group = await prisma.groupSetting.findUnique({ where: { chatId: groupId }, select: { enabled: true } });
   if (!group) throw new AppError(404, 'This Telegram group is not registered. Add the bot and run /registergroup there first.', 'GROUP_NOT_REGISTERED');
   if (!group.enabled) throw new AppError(403, 'Red envelopes are disabled in this group', 'GROUP_DISABLED');
+  const eligibleTelegramIds = normalizeEligibleTelegramIds(parsed.audience, parsed.eligibleTelegramIds);
+  if (parsed.audience === 'SELECTED' && eligibleTelegramIds.length === 0) {
+    throw new AppError(400, 'Select at least one group member or change the audience to everyone', 'ENVELOPE_AUDIENCE_EMPTY');
+  }
+  if (parsed.audience === 'SELECTED') {
+    const selectedMembers = await prisma.groupMember.findMany({
+      where: {
+        chatId: groupId,
+        telegramId: { in: eligibleTelegramIds.map((telegramId) => BigInt(telegramId)) },
+        isMember: true,
+        isBot: false
+      },
+      select: { telegramId: true }
+    });
+    if (selectedMembers.length !== eligibleTelegramIds.length) {
+      throw new AppError(400, 'One or more selected accounts are not in this group roster. Refresh the roster and try again.', 'ENVELOPE_AUDIENCE_INVALID');
+    }
+  }
   if (totalMinor < BigInt(parsed.count)) throw new AppError(400, 'Each slot must contain at least 0.000001 USDT', 'AMOUNT_TOO_SMALL');
   const id = randomUUID();
   try {
@@ -41,11 +62,17 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
         totalSlots: parsed.count,
         remainingSlots: parsed.count,
         mode: parsed.mode as EnvelopeMode,
+        audience: parsed.audience as EnvelopeAudience,
         expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
         status: EnvelopeStatus.ACTIVE
       }, include: { sender: { select: { firstName: true } } } });
+      if (eligibleTelegramIds.length > 0) {
+        await tx.redEnvelopeEligibleUser.createMany({
+          data: eligibleTelegramIds.map((telegramId) => ({ envelopeId: envelope.id, telegramId: BigInt(telegramId) }))
+        });
+      }
       const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
-      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId } });
+      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId, audience: parsed.audience, eligibleCount: eligibleTelegramIds.length } });
       return { envelope, availableMinor: debit.availableMinor };
     }, { isolationLevel: 'ReadCommitted' });
   } catch (error) {
@@ -98,13 +125,24 @@ export async function refundUnpublishedEnvelope(envelopeId: string, actorId?: st
 export async function claimEnvelope(userId: string, envelopeId: string, ipAddress?: string) {
   const initial = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, select: { groupId: true } });
   if (!initial) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
-  await assertClaimEligibility(userId, initial.groupId);
+  await assertClaimEligibility(userId, initial.groupId, envelopeId);
 
   try {
     const result = await prisma.$transaction(async (tx: Transaction) => {
       await lockEnvelope(tx, envelopeId);
       const envelope = await tx.redEnvelope.findUnique({ where: { id: envelopeId } });
       if (!envelope) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
+      const claimant = await tx.user.findUnique({ where: { id: userId }, select: { telegramId: true } });
+      if (!claimant) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+      const allowed = envelope.audience === EnvelopeAudience.SELECTED
+        ? await tx.redEnvelopeEligibleUser.findUnique({
+          where: { envelopeId_telegramId: { envelopeId, telegramId: claimant.telegramId } },
+          select: { telegramId: true }
+        })
+        : null;
+      if (!isEnvelopeAudienceAllowed({ audience: envelope.audience, isSelected: Boolean(allowed) })) {
+        throw new AppError(403, 'This red envelope is limited to selected group members', 'ENVELOPE_NOT_ELIGIBLE');
+      }
       if (envelope.status !== EnvelopeStatus.ACTIVE || envelope.remainingSlots <= 0 || envelope.remainingMinor <= 0n) {
         return { kind: 'closed' as const };
       }
