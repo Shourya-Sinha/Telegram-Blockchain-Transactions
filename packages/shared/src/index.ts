@@ -67,6 +67,13 @@ export const telegramUserIdSchema = z.string()
   .max(16)
   .refine((value) => /^\d{1,16}$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)), 'Telegram user ID must be a positive, safe integer');
 
+export const telegramUsernameSchema = z.string()
+  .trim()
+  .max(33)
+  .transform((value) => value.startsWith('@') ? value.slice(1) : value)
+  .transform((value) => value.toLowerCase())
+  .refine((value) => /^[a-z0-9_]{5,32}$/.test(value), 'Telegram username must contain 5–32 letters, numbers, or underscores');
+
 export const createEnvelopeSchema = z.object({
   total: z.string().regex(/^\d+(\.\d{1,6})?$/),
   count: z.number().int().min(1).max(500),

@@ -11,12 +11,13 @@ import { approveWithdrawal, rejectWithdrawal, retryWithdrawal } from '../service
 import { tronGateway } from '../services/tronGateway';
 import { creditWallet, writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
-import { formatMinor, jsonSafe, parseUsdtToMinor, telegramUserIdSchema } from '@red-envelope/shared';
+import { formatMinor, jsonSafe, parseUsdtToMinor, telegramUserIdSchema, telegramUsernameSchema } from '@red-envelope/shared';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
 import { AppError } from '../utils/errors';
 import { verifyTotp } from '../utils/totp';
 import { asyncHandler } from '../utils/asyncHandler';
+import { getVerifiedTelegramGroupUsername } from '../services/telegramService';
 
 export const adminRouter = Router();
 
@@ -113,6 +114,69 @@ adminRouter.get('/groups/:chatId/members', asyncHandler(async (req, res) => {
     })
   ]);
   res.json(jsonSafe({ group, total, offset: query.offset, limit: query.limit, members }));
+}));
+
+adminRouter.post('/groups/:chatId/resolve-usernames', asyncHandler(async (req, res) => {
+  const chatIdText = z.string().max(20).regex(/^-?\d+$/).parse(String(req.params.chatId));
+  const payload = z.object({ usernames: z.array(telegramUsernameSchema).min(1).max(500) }).parse(req.body);
+  const usernames = [...new Set(payload.usernames)];
+  const chatId = BigInt(chatIdText);
+  const group = await prisma.groupSetting.findUnique({ where: { chatId }, select: { chatId: true } });
+  if (!group) throw new AppError(404, 'Telegram group not found', 'GROUP_NOT_FOUND');
+
+  const [groupMembers, knownUsers] = await Promise.all([
+    prisma.groupMember.findMany({
+      where: { chatId, isMember: true, isBot: false, username: { in: usernames, mode: 'insensitive' } },
+      select: { telegramId: true, username: true }
+    }),
+    prisma.user.findMany({
+      where: { status: 'ACTIVE', username: { in: usernames, mode: 'insensitive' } },
+      select: { telegramId: true, username: true }
+    })
+  ]);
+
+  const candidatesByUsername = new Map(usernames.map((username) => [username, new Set<string>()]));
+  for (const candidate of [...groupMembers, ...knownUsers]) {
+    const username = candidate.username?.toLowerCase();
+    if (username && candidatesByUsername.has(username)) {
+      candidatesByUsername.get(username)!.add(candidate.telegramId.toString());
+    }
+  }
+  const candidateChecks = [...candidatesByUsername].flatMap(([username, telegramIds]) =>
+    [...telegramIds].map((telegramId) => ({ username, telegramId }))
+  );
+  if (candidateChecks.length > 2_000) {
+    throw new AppError(400, 'Too many stored matches for these usernames. Add recipients in smaller batches or use numeric Telegram IDs.', 'TELEGRAM_USERNAME_MATCH_LIMIT');
+  }
+
+  const matchesByUsername = new Map<string, Array<{ username: string; telegramId: string }>>();
+  let nextCandidate = 0;
+  const verifyNextCandidates = async () => {
+    while (nextCandidate < candidateChecks.length) {
+      const candidate = candidateChecks[nextCandidate++];
+      const currentUsername = await getVerifiedTelegramGroupUsername(chatId, BigInt(candidate.telegramId), candidate.username);
+      if (!currentUsername) continue;
+      const matches = matchesByUsername.get(candidate.username) ?? [];
+      matches.push({ username: currentUsername, telegramId: candidate.telegramId });
+      matchesByUsername.set(candidate.username, matches);
+    }
+  };
+  const workers = Array.from({ length: Math.min(8, candidateChecks.length) }, () => verifyNextCandidates());
+  await Promise.all(workers);
+
+  const unresolved = usernames.filter((username) => (matchesByUsername.get(username)?.length ?? 0) === 0);
+  const ambiguous = usernames.filter((username) => (matchesByUsername.get(username)?.length ?? 0) > 1);
+  if (unresolved.length > 0 || ambiguous.length > 0) {
+    const formatUsernames = (values: string[]) => `${values.slice(0, 10).map((username) => `@${username}`).join(', ')}${values.length > 10 ? ` … and ${values.length - 10} more` : ''}`;
+    const reasons = [
+      unresolved.length ? `Could not resolve current group member username(s): ${formatUsernames(unresolved)}.` : '',
+      ambiguous.length ? `Username match is ambiguous: ${formatUsernames(ambiguous)}. Use numeric Telegram IDs instead.` : ''
+    ].filter(Boolean);
+    throw new AppError(400, `${reasons.join(' ')} Usernames can only be resolved from profiles already known to the bot or app. Ask the member to appear in a group update, or enter their numeric ID; the bot must be a group administrator to verify membership.`, 'TELEGRAM_USERNAME_UNRESOLVED');
+  }
+
+  const resolved = usernames.map((username) => matchesByUsername.get(username)![0]);
+  res.json({ resolved });
 }));
 
 adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {

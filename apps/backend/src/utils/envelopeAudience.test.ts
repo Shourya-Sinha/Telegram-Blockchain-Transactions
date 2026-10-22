@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { createEnvelopeSchema } from '@red-envelope/shared';
+import { createEnvelopeSchema, telegramUsernameSchema } from '@red-envelope/shared';
 import { isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds } from './envelopeAudience';
 
 test('new envelope requests default to the legacy unrestricted audience', () => {
@@ -20,6 +20,24 @@ test('selected audience accepts bounded positive decimal Telegram IDs only', () 
   assert.equal(nonNumeric.success, false);
   assert.equal(zero.success, false);
   assert.equal(unsafe.success, false);
+});
+
+test('Telegram usernames allow an optional @ and normalize to lowercase', () => {
+  const valid = telegramUsernameSchema.safeParse('@Alice_123');
+  assert.equal(valid.success, true);
+  if (valid.success) assert.equal(valid.data, 'alice_123');
+  assert.equal(telegramUsernameSchema.safeParse('abcd').success, false);
+  assert.equal(telegramUsernameSchema.safeParse('https://t.me/alice').success, false);
+});
+
+test('username resolution looks up known profiles and verifies the current Telegram username', () => {
+  const routes = readFileSync(resolve(process.cwd(), 'src/routes/adminRoutes.ts'), 'utf8');
+  const telegram = readFileSync(resolve(process.cwd(), 'src/services/telegramService.ts'), 'utf8');
+  assert.match(routes, /groups\/:chatId\/resolve-usernames/);
+  assert.match(routes, /prisma\.groupMember\.findMany/);
+  assert.match(routes, /prisma\.user\.findMany/);
+  assert.match(telegram, /member\.user\.username/);
+  assert.match(telegram, /requestedUsername\.toLowerCase\(\)/);
 });
 
 test('selected audience caps its allowlist at 500 IDs', () => {
