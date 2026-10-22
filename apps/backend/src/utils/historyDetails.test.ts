@@ -90,6 +90,16 @@ test('unsatisfied group claim requirements have actionable localized messages', 
   assert.match(claim, /claimRequirementsNotMet \? t\('claimRequirementsTitle'\)/);
 });
 
+test('envelope details include sender data and the claim view tolerates missing profile fields', () => {
+  const service = read('src/services/envelopeService.ts');
+  const claim = read('../frontend/src/components/ClaimModal.tsx');
+  assert.match(service, /include: \{ sender: \{ select: \{ firstName: true, username: true \} \}, claims:/);
+  assert.match(claim, /detail\.data\?\.sender\?\.firstName/);
+  assert.match(claim, /detail\.data\?\.sender\?\.username/);
+  assert.match(claim, /claim\.user\?\.firstName/);
+  assert.match(claim, /claim\.user\?\.username/);
+});
+
 test('the envelope screen keeps its exits and shows the envelope details', () => {
   const claim = read('../frontend/src/components/ClaimModal.tsx');
   assert.match(claim, /className="hb-topbar"/);

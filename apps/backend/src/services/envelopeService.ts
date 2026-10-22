@@ -202,7 +202,7 @@ export async function claimEnvelope(userId: string, envelopeId: string, ipAddres
 }
 
 export async function getEnvelope(envelopeId: string) {
-  const envelope = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, include: { claims: { orderBy: { claimedAt: 'asc' }, include: { user: { select: { firstName: true, username: true } } } } } });
+  const envelope = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, include: { sender: { select: { firstName: true, username: true } }, claims: { orderBy: { claimedAt: 'asc' }, include: { user: { select: { firstName: true, username: true } } } } } });
   if (!envelope) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
   return envelope;
 }
