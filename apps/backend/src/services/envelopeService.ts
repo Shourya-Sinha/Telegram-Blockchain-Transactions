@@ -8,6 +8,7 @@ import { assertClaimEligibility } from './eligibilityService';
 import { creditWallet, debitWallet, type Transaction, writeAudit } from './ledgerService';
 import { randomClaimAmount } from '../utils/envelopeAllocation';
 import { isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds } from '../utils/envelopeAudience';
+import { assertTelegramGroupMembership } from './telegramService';
 
 export type CreateEnvelopeInput = {
   total: string;
@@ -22,6 +23,32 @@ export type CreateEnvelopeInput = {
   actorId?: string;
 };
 
+async function assertSelectedTelegramMembers(groupId: bigint, telegramIds: string[]): Promise<void> {
+  let nextIndex = 0;
+  const failures: Array<{ telegramId: string; error: unknown }> = [];
+  const workers = Array.from({ length: Math.min(8, telegramIds.length) }, async () => {
+    while (nextIndex < telegramIds.length) {
+      const telegramId = telegramIds[nextIndex++];
+      try {
+        await assertTelegramGroupMembership(groupId, BigInt(telegramId));
+      } catch (error) {
+        failures.push({ telegramId, error });
+      }
+    }
+  });
+  await Promise.all(workers);
+
+  if (failures.length === 0) return;
+  const notMembers = failures.filter(({ error }) => error instanceof AppError && error.code === 'GROUP_MEMBERSHIP_REQUIRED').map(({ telegramId }) => telegramId);
+  const unverified = failures.filter(({ error }) => !(error instanceof AppError) || error.code !== 'GROUP_MEMBERSHIP_REQUIRED').map(({ telegramId }) => telegramId);
+  const formatIds = (ids: string[]) => `${ids.slice(0, 10).join(', ')}${ids.length > 10 ? ` … and ${ids.length - 10} more` : ''}`;
+  const reasons = [
+    notMembers.length ? `Not current members of this group: ${formatIds(notMembers)}.` : '',
+    unverified.length ? `Could not verify: ${formatIds(unverified)}. Check the IDs and make sure the bot is a group administrator.` : ''
+  ].filter(Boolean);
+  throw new AppError(400, reasons.join(' '), 'ENVELOPE_AUDIENCE_INVALID');
+}
+
 export async function createEnvelope(senderId: string, input: CreateEnvelopeInput) {
   const parsed = createEnvelopeSchema.parse(input);
   if ((await redis.get('emergency:envelopes-disabled')) === '1') throw new AppError(503, 'Red envelope creation is temporarily disabled', 'ENVELOPES_DISABLED');
@@ -34,21 +61,13 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
   if (parsed.audience === 'SELECTED' && eligibleTelegramIds.length === 0) {
     throw new AppError(400, 'Select at least one group member or change the audience to everyone', 'ENVELOPE_AUDIENCE_EMPTY');
   }
-  if (parsed.audience === 'SELECTED') {
-    const selectedMembers = await prisma.groupMember.findMany({
-      where: {
-        chatId: groupId,
-        telegramId: { in: eligibleTelegramIds.map((telegramId) => BigInt(telegramId)) },
-        isMember: true,
-        isBot: false
-      },
-      select: { telegramId: true }
-    });
-    if (selectedMembers.length !== eligibleTelegramIds.length) {
-      throw new AppError(400, 'One or more selected accounts are not in this group roster. Refresh the roster and try again.', 'ENVELOPE_AUDIENCE_INVALID');
-    }
-  }
   if (totalMinor < BigInt(parsed.count)) throw new AppError(400, 'Each slot must contain at least 0.000001 USDT', 'AMOUNT_TOO_SMALL');
+  if (parsed.audience === 'SELECTED') {
+    // The admin may choose an observed profile or enter a Telegram user ID
+    // manually. Verify every ID against this Telegram group before taking
+    // funds; profiles do not need a pre-existing wallet or roster row.
+    await assertSelectedTelegramMembers(groupId, eligibleTelegramIds);
+  }
   const id = randomUUID();
   try {
     return await prisma.$transaction(async (tx: Transaction) => {

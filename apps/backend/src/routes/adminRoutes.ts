@@ -11,7 +11,7 @@ import { approveWithdrawal, rejectWithdrawal, retryWithdrawal } from '../service
 import { tronGateway } from '../services/tronGateway';
 import { creditWallet, writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
-import { formatMinor, jsonSafe, parseUsdtToMinor } from '@red-envelope/shared';
+import { formatMinor, jsonSafe, parseUsdtToMinor, telegramUserIdSchema } from '@red-envelope/shared';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
 import { listRegisteredGroups } from '../services/groupService';
 import { AppError } from '../utils/errors';
@@ -123,7 +123,7 @@ adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, Admi
     groupId: z.string().max(20).regex(/^-?\d+$/),
     expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440),
     audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
-    eligibleTelegramIds: z.array(z.string().max(16).regex(/^\d+$/)).max(5000).default([])
+    eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([])
   }).parse(req.body);
   if (!/^\d+$/.test(config.redEnvelope.treasuryTelegramId)) {
     throw new AppError(503, 'RED_ENVELOPE_TREASURY_TELEGRAM_ID is not configured', 'TREASURY_NOT_CONFIGURED');
