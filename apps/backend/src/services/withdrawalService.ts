@@ -12,7 +12,7 @@ import { tronGateway } from './tronGateway';
 type RequestInput = { amount: string; toAddress: string; idempotencyKey?: string; ipAddress?: string };
 
 async function lockWithdrawal(tx: Transaction, id: string) {
-  await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"Withdrawal\" WHERE \"id\" = $1 FOR UPDATE`, id);
+  await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"Withdrawal\" WHERE \"id\" = $1::uuid FOR UPDATE`, id);
   return tx.withdrawal.findUnique({ where: { id } });
 }
 

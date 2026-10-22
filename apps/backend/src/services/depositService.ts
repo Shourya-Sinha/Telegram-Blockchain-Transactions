@@ -29,7 +29,7 @@ export async function recordIncomingTransfer(userId: string, transfer: IncomingT
     if (confirmations < config.tron.confirmations) {
       return tx.deposit.update({ where: { id: deposit.id }, data: { confirmations } });
     }
-    const locked = await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"Deposit\" WHERE \"id\" = $1 FOR UPDATE`, deposit.id);
+    const locked = await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"Deposit\" WHERE \"id\" = $1::uuid FOR UPDATE`, deposit.id);
     void locked;
     const latest = await tx.deposit.findUnique({ where: { id: deposit.id } });
     if (!latest || latest.status === DepositStatus.CONFIRMED) return latest ?? deposit;

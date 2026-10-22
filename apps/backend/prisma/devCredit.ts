@@ -26,7 +26,7 @@ async function main() {
 
     const balance = await prisma.$transaction(async (tx: any) => {
       const rows = await tx.$queryRawUnsafe(
-        `SELECT "id", "availableMinor" FROM "WalletAccount" WHERE "userId" = $1 FOR UPDATE`,
+        `SELECT "id", "availableMinor" FROM "WalletAccount" WHERE "userId" = $1::uuid FOR UPDATE`,
         user.id
       ) as Array<{ id: string; availableMinor: bigint }>;
       const wallet = rows[0];
