@@ -136,7 +136,7 @@ export function createTelegramBot(): Bot {
     '/history — recent ledger activity',
     '/lang en|zh — switch the bot language (English / 中文)',
     '/myid — show your Telegram ID (used to configure a treasury wallet)',
-    '/registergroup — register this group and post a member self-registration button',
+    '/registergroup — register this group in the app',
     '/redpacket <amount> <count> — fund and post a random red envelope in a group'
   ].join('\n')));
 
@@ -199,40 +199,14 @@ export function createTelegramBot(): Bot {
       await ctx.reply('Run /registergroup inside the Telegram group where envelopes should be posted.');
       return;
     }
+    // const group = await registerTelegramGroup(ctx.chat);
+    // await ctx.reply(`✅ Group registered\n${group?.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`, { parse_mode: 'HTML' });
     await registerTelegramGroup(ctx.chat);
+
     await ctx.reply(
-      [
-        `✅ Group registered\n${ctx.chat.title ?? 'This group'}\nID: ${ctx.chat.id}`,
-        'Telegram does not send bots a list of existing group members. Ask each member to tap the button once so they can appear in the eligible-recipient picker.',
-        'Telegram 不会向机器人提供现有群成员名单。请每位成员点击下方按钮一次，之后即可在可选收件人列表中显示。'
-      ].join('\n\n'),
-      { reply_markup: new InlineKeyboard().text('✅ Register me · 登记成员', `group-roster-register:${ctx.chat.id}`) }
+      `✅ Group registered\n${ctx.chat.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`,
+      { parse_mode: 'HTML' }
     );
-  });
-
-  bot.callbackQuery(/^group-roster-register:-?\d{1,20}$/, async (ctx) => {
-    const message = ctx.callbackQuery.message;
-    if (!message || !['group', 'supergroup'].includes(message.chat.type)) {
-      await ctx.answerCallbackQuery({ text: 'Use this registration button from the Telegram group.', show_alert: true });
-      return;
-    }
-
-    const groupIdMatch = ctx.callbackQuery.data.match(/^group-roster-register:(-?\d{1,20})$/);
-    if (!groupIdMatch || BigInt(message.chat.id) !== BigInt(groupIdMatch[1])) {
-      await ctx.answerCallbackQuery({ text: 'This group registration button is invalid.', show_alert: true });
-      return;
-    }
-
-    try {
-      await assertTelegramGroupMembership(BigInt(groupIdMatch[1]), BigInt(ctx.from.id));
-      await recordTelegramGroupMember(message.chat, ctx.from);
-      await ctx.answerCallbackQuery({ text: "✅ Registered for this group's recipient list. / 已登记到本群收件人名单。" });
-    } catch (error) {
-      await ctx.answerCallbackQuery({
-        text: error instanceof Error ? error.message.slice(0, 190) : 'Unable to register this Telegram account.',
-        show_alert: true
-      });
-    }
   });
 
   bot.command('balance', async (ctx) => {

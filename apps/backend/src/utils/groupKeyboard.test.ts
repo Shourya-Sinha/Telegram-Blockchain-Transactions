@@ -48,19 +48,6 @@ test('the bot installs the group button guard on every outgoing Telegram call', 
   assert.match(source, /installGroupButtonGuard\(bot\)/);
 });
 
-test('existing members can self-register through the group roster prompt', () => {
-  const source = read('src/bot/bot.ts');
-  const registrationStart = source.indexOf("bot.command('registergroup'");
-  const nextCommand = source.indexOf("bot.command('balance'", registrationStart);
-  const registrationFlow = source.slice(registrationStart, nextCommand);
-  assert.notEqual(registrationStart, -1);
-  assert.match(registrationFlow, /group-roster-register:\$\{ctx\.chat\.id\}/);
-  assert.match(registrationFlow, /bot\.callbackQuery\(\/\^group-roster-register:/);
-  assert.match(registrationFlow, /assertTelegramGroupMembership\(/);
-  assert.match(registrationFlow, /recordTelegramGroupMember\(message\.chat, ctx\.from\)/);
-  assert.match(registrationFlow, /BigInt\(message\.chat\.id\) !== BigInt\(groupIdMatch\[1\]\)/);
-});
-
 test('rewriteGroupWebAppButtons converts a web_app button aimed at a group into a t.me deep link', () => {
   const payload = {
     chat_id: -1003589890000,

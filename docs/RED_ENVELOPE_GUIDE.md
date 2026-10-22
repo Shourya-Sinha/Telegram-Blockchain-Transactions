@@ -74,15 +74,14 @@ For every destination group:
 
 1. Open the group in Telegram and add the bot.
 2. Promote the bot to group administrator. It needs permission to send/edit messages; admin status also makes membership verification reliable.
-3. The bot records the group title and numeric ID when Telegram sends the bot-added update. If it does not appear, run `/registergroup` in that group; the bot replies with the group title and ID plus a member registration button.
-4. Ask each existing group member to tap **Register me** on that message once. The bot verifies their membership and adds their profile to the selectable roster. New members can also tap the button after they join.
-5. Open **Admin → Groups & members** to see the group card (name + ID) and observed/registered member profiles. **Send envelope** and **Group settings** also use the registered group list.
+3. The bot records the group title and numeric ID when Telegram sends the bot-added update. If it does not appear, run `/registergroup` in that group; the bot replies with the group title and ID.
+4. Open **Admin → Groups & members** to see the group card (name + ID) and the member profiles observed by the bot. **Send envelope** and **Group settings** also use the registered group list.
 
 The new `GroupMember` and envelope-audience tables are in the included Prisma migration. Apply it before using this feature (`npm run db:migrate` for a local database; Docker runs `prisma migrate deploy` at backend startup), then regenerate the client if your workflow does not do so automatically (`npm run db:generate`).
 
 ### What the member directory can and cannot show
 
-Telegram's Bot API does not let a bot download a complete or historical member list, nor does it provide a member's phone number. The directory stores public profile fields Telegram includes in updates (Telegram ID, first/last name, username, language, Premium/bot flags, observed messages, and first/last seen). It cannot silently backfill members who have never appeared in an update. To make existing members available, run `/registergroup` and ask each member to tap the registration button; their profile is then added after Telegram confirms they are still in the group. A phone number is available only if that person explicitly shares their contact with the bot.
+Telegram's Bot API does not let a bot download a complete or historical member list, nor does it provide a member's phone number. The directory stores public profile fields Telegram includes in updates (Telegram ID, first/last name, username, language, Premium/bot flags, observed messages, and first/last seen). It begins filling after the bot is added and receives updates; it cannot backfill members who have never appeared in an update. A phone number is available only if that person explicitly shares their contact with the bot.
 
 For ordinary group messages to populate the roster and message counts, make the bot an administrator or disable its privacy mode through BotFather (`/setprivacy`). With privacy mode enabled, Telegram generally sends only commands, bot-directed messages, and service updates. Membership is checked with Telegram again when someone actually claims.
 
@@ -148,7 +147,7 @@ Before real funds are accepted, implement unique deposit-address provisioning (o
 
 1. Sign in to the admin frontend with the seeded admin credentials.
 2. Open **Send envelope** and select the destination group by name (the group ID is shown too).
-3. Choose the claim audience. **Selected members only** is the safe default: manually tick the observed member profiles that may claim. The picker supports search and paging. If a current member is missing, run `/registergroup` in Telegram and ask that person to tap the registration button, then refresh the picker. Only selected Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
+3. Choose the claim audience. **Selected members only** is the safe default: manually tick the observed member profiles that may claim. The picker supports search and paging. Only those Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
 4. Enter total USDT, number of claims, random/equal mode, and expiry.
 5. Confirm that the treasury balance covers the total.
 6. Click **Send to Telegram group**.
