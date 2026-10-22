@@ -292,10 +292,15 @@ async function readMembership(groupId: bigint, telegramId: bigint) {
   return getTelegramBot().api.getChatMember(groupId.toString(), numericTelegramId);
 }
 
+function isCurrentTelegramMember(member: Awaited<ReturnType<typeof readMembership>>): boolean {
+  return member.status !== 'left'
+    && member.status !== 'kicked'
+    && (member.status !== 'restricted' || member.is_member);
+}
+
 export async function isTelegramGroupMember(groupId: bigint, telegramId: bigint): Promise<boolean> {
   try {
-    const member = await readMembership(groupId, telegramId);
-    return member.status !== 'left' && member.status !== 'kicked';
+    return isCurrentTelegramMember(await readMembership(groupId, telegramId));
   } catch {
     return false;
   }
@@ -304,7 +309,7 @@ export async function isTelegramGroupMember(groupId: bigint, telegramId: bigint)
 export async function assertTelegramGroupMembership(groupId: bigint, telegramId: bigint): Promise<void> {
   try {
     const member = await readMembership(groupId, telegramId);
-    if (member.status === 'left' || member.status === 'kicked') {
+    if (!isCurrentTelegramMember(member)) {
       throw new AppError(403, 'Join the Telegram group before continuing', 'GROUP_MEMBERSHIP_REQUIRED');
     }
   } catch (error) {
