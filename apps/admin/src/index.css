@@ -119,3 +119,15 @@
   .picker-last-seen { display: none; }
 }
 .audience-member-picker .search-box { flex-direction: row !important; margin: 0; }
+.manual-id-entry { margin: 10px 0 12px; padding: 10px; border: 1px solid #203950; border-radius: 9px; background: rgba(9, 23, 40, .72); }
+.manual-id-entry > label { gap: 6px !important; margin: 0 !important; color: #a4b7c9 !important; font-size: 9px !important; }
+.manual-id-entry textarea { width: 100%; resize: vertical; padding: 8px 9px; border: 1px solid #2a435c; border-radius: 7px; outline: 0; color: #e4eff8; background: #091728; font: 10px/1.5 ui-monospace, monospace; }
+.manual-id-entry textarea:focus { border-color: #68b8e7; box-shadow: 0 0 0 3px rgba(78, 170, 220, .1); }
+.manual-id-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; }
+.manual-id-controls small { flex: 1; min-width: 180px; color: #71879c; font-size: 8px; line-height: 1.4; }
+.manual-id-controls .table-action { flex: none; }
+.manual-id-error { margin: 7px 0 0; color: #ffaaa2; font-size: 9px; }
+.manual-id-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.manual-id-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px 3px 7px; border: 1px solid #31516b; border-radius: 7px; color: #a9c7df; background: #10283b; }
+.manual-id-chip code { color: #9bc9e8; font-size: 8px; }
+.manual-id-chip button { display: grid; width: 14px; height: 14px; place-items: center; border-radius: 4px; color: #ffaaa2; background: rgba(221, 81, 78, .12); font-size: 11px; line-height: 1; }

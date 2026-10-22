@@ -5,6 +5,13 @@ import { groupMemberDisplayName } from '../utils/groupMemberDisplay';
 import { useT } from '../i18n';
 
 const PICKER_PAGE_SIZE = 25;
+const MAX_ELIGIBLE_RECIPIENTS = 500;
+
+function isValidTelegramId(value: string): boolean {
+  return /^\d{1,16}$/.test(value)
+    && BigInt(value) > 0n
+    && Number.isSafeInteger(Number(value));
+}
 
 export function GroupMemberPicker({
   groupId,
@@ -18,6 +25,9 @@ export function GroupMemberPicker({
   const t = useT();
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [manualIdInput, setManualIdInput] = useState('');
+  const [manuallyAddedIds, setManuallyAddedIds] = useState<string[]>([]);
+  const [manualIdError, setManualIdError] = useState('');
   const query = useQuery({
     queryKey: ['envelope-group-members', groupId, search, offset],
     enabled: Boolean(groupId),
@@ -27,23 +37,59 @@ export function GroupMemberPicker({
   });
   const members = query.data?.members ?? [];
   const selected = new Set(selectedTelegramIds);
+  const selectedManualIds = manuallyAddedIds.filter((id) => selected.has(id));
   const pageIds = members.map((member) => member.telegramId);
   const pageFullySelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.total / PICKER_PAGE_SIZE)) : 1;
   const page = Math.floor(offset / PICKER_PAGE_SIZE) + 1;
 
   const toggleMember = (telegramId: string) => {
+    if (!selected.has(telegramId) && selectedTelegramIds.length >= MAX_ELIGIBLE_RECIPIENTS) {
+      setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
+      return;
+    }
     onSelectionChange(selected.has(telegramId)
       ? selectedTelegramIds.filter((id) => id !== telegramId)
-      : [...selectedTelegramIds, telegramId]);
+      : [...new Set([...selectedTelegramIds, telegramId])]);
+    setManualIdError('');
   };
   const togglePage = () => {
-    if (pageFullySelected) {
-      const visibleIds = new Set(pageIds);
-      onSelectionChange(selectedTelegramIds.filter((id) => !visibleIds.has(id)));
-    } else {
-      onSelectionChange([...new Set([...selectedTelegramIds, ...pageIds])]);
+    const visibleIds = new Set(pageIds);
+    const nextIds = pageFullySelected
+      ? selectedTelegramIds.filter((id) => !visibleIds.has(id))
+      : [...new Set([...selectedTelegramIds, ...pageIds])];
+    if (nextIds.length > MAX_ELIGIBLE_RECIPIENTS) {
+      setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
+      return;
     }
+    onSelectionChange(nextIds);
+    setManualIdError('');
+  };
+  const addManualIds = () => {
+    const rawIds = manualIdInput.split(/[\s,;]+/).filter(Boolean);
+    if (rawIds.length === 0) {
+      setManualIdError(t('enterTelegramIds'));
+      return;
+    }
+    if (rawIds.some((id) => !isValidTelegramId(id))) {
+      setManualIdError(t('invalidTelegramIds'));
+      return;
+    }
+    const newIds = [...new Set(rawIds.map((id) => BigInt(id).toString()))];
+    const nextIds = [...new Set([...selectedTelegramIds, ...newIds])];
+    if (nextIds.length > MAX_ELIGIBLE_RECIPIENTS) {
+      setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
+      return;
+    }
+    onSelectionChange(nextIds);
+    setManuallyAddedIds((current) => [...new Set([...current, ...newIds])]);
+    setManualIdInput('');
+    setManualIdError('');
+  };
+  const removeManualId = (telegramId: string) => {
+    onSelectionChange(selectedTelegramIds.filter((id) => id !== telegramId));
+    setManuallyAddedIds((current) => current.filter((id) => id !== telegramId));
+    setManualIdError('');
   };
 
   return <section className="audience-member-picker">
@@ -52,6 +98,29 @@ export function GroupMemberPicker({
       <button type="button" className="refresh-button" onClick={() => void query.refetch()}>{t('refreshRoster')}</button>
     </div>
     <p className="picker-note">{t('eligibleMembersNote')}</p>
+    <div className="manual-id-entry">
+      <label>
+        <span>{t('manualTelegramIds')}</span>
+        <textarea
+          rows={2}
+          value={manualIdInput}
+          onChange={(event) => setManualIdInput(event.target.value)}
+          placeholder={t('manualTelegramIdsPlaceholder')}
+          aria-label={t('manualTelegramIds')}
+        />
+      </label>
+      <div className="manual-id-controls">
+        <small>{t('manualTelegramIdsHint')}</small>
+        <button type="button" className="table-action" onClick={addManualIds}>{t('addTelegramIds')}</button>
+      </div>
+      {manualIdError && <p className="manual-id-error">{manualIdError}</p>}
+      {selectedManualIds.length > 0 && <div className="manual-id-chips">
+        {selectedManualIds.map((id) => <span className="manual-id-chip" key={id}>
+          <code>{id}</code>
+          <button type="button" aria-label={t('removeSelectedTelegramId', id)} onClick={() => removeManualId(id)}>×</button>
+        </span>)}
+      </div>}
+    </div>
     <div className="picker-toolbar">
       <label className="search-box"><span>⌕</span><input aria-label={t('searchGroupMembers')} placeholder={t('searchGroupMembers')} value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} /></label>
       {members.length > 0 && <button type="button" className="table-action" onClick={togglePage}>{pageFullySelected ? t('clearThisPage') : t('selectThisPage')}</button>}

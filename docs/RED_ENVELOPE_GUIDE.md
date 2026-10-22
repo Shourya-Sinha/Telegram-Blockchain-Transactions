@@ -147,7 +147,7 @@ Before real funds are accepted, implement unique deposit-address provisioning (o
 
 1. Sign in to the admin frontend with the seeded admin credentials.
 2. Open **Send envelope** and select the destination group by name (the group ID is shown too).
-3. Choose the claim audience. **Selected members only** is the safe default: manually tick the observed member profiles that may claim. The picker supports search and paging. Only those Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
+3. Choose the claim audience. **Selected members only** is the safe default: tick observed profiles or paste known Telegram user IDs into the manual-ID field (comma, space, or newline separated). This lets admins select members whose profiles have not appeared in the roster; Telegram does not let the bot discover unknown user IDs, so the admin must supply them. Before posting, the bot verifies every selected ID is currently in the chosen group; it checks membership again at claim time. Only selected Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
 4. Enter total USDT, number of claims, random/equal mode, and expiry.
 5. Confirm that the treasury balance covers the total.
 6. Click **Send to Telegram group**.
