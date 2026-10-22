@@ -115,12 +115,33 @@ if (config.nodeEnv !== 'test') {
       // Make the Mini App discoverable: a persistent "Wallet" button in the
       // bot chat menu (next to the message input) plus the command list shown
       // when typing "/". This is the primary way users open their wallet.
+      // try {
+      //   if (isTelegramWebAppUrl(config.publicAppUrl)) {
+      //     await bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: '🧧 Wallet', web_app: { url: config.publicAppUrl } } });
+      //     console.log('[telegram] mini app menu button configured');
+      //   } else {
+      //     console.warn('[telegram] PUBLIC_APP_URL is not an HTTPS/localhost URL; skipping mini app menu button');
+      //   }
+      // } catch (menuError) {
+      //   console.error('[telegram] menu button setup failed', menuError);
+      // }
       try {
         if (isTelegramWebAppUrl(config.publicAppUrl)) {
-          await bot.api.setChatMenuButton({ menu_button: { type: 'web_app', text: '🧧 Wallet', web_app: { url: config.publicAppUrl } } });
-          console.log('[telegram] mini app menu button configured');
+          await bot.api.setChatMenuButton({
+            menu_button: {
+              type: 'web_app',
+              text: '🧧 Wallet',
+              web_app: { url: config.publicAppUrl },
+            },
+          });
+
+          console.log(
+            `[telegram] Wallet menu button configured: ${config.publicAppUrl}`,
+          );
         } else {
-          console.warn('[telegram] PUBLIC_APP_URL is not an HTTPS/localhost URL; skipping mini app menu button');
+          console.warn(
+            '[telegram] Invalid PUBLIC_APP_URL; skipping Mini App menu button',
+          );
         }
       } catch (menuError) {
         console.error('[telegram] menu button setup failed', menuError);

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+﻿import { existsSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 
@@ -122,3 +122,4 @@ export function assertProductionConfig(): void {
     if (config.depositMode !== 'unique') throw new Error('Real-funds mode requires DEPOSIT_MODE=unique; shared deposit addresses are not supported');
   }
 }
+
