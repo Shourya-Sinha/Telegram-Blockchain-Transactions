@@ -105,7 +105,7 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
 }
 
 async function lockEnvelope(tx: Transaction, envelopeId: string): Promise<void> {
-  await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"RedEnvelope\" WHERE \"id\" = $1 FOR UPDATE`, envelopeId);
+  await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"RedEnvelope\" WHERE \"id\" = $1::uuid FOR UPDATE`, envelopeId);
 }
 
 export async function attachEnvelopeMessage(envelopeId: string, messageId: number): Promise<void> {

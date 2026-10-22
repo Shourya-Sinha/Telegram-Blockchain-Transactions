@@ -22,7 +22,8 @@ export async function ensureWalletForTelegram(identity: { telegramId: bigint; us
 }
 
 async function lockWallet(tx: Transaction, userId: string): Promise<WalletRow> {
-  const rows = await tx.$queryRawUnsafe(`SELECT \"id\", \"availableMinor\", \"lockedMinor\", \"version\" FROM \"WalletAccount\" WHERE \"userId\" = $1 FOR UPDATE`, userId) as WalletRow[];
+  // PostgreSQL binds raw string parameters as text; cast to uuid to match WalletAccount.userId.
+  const rows = await tx.$queryRawUnsafe(`SELECT \"id\", \"availableMinor\", \"lockedMinor\", \"version\" FROM \"WalletAccount\" WHERE \"userId\" = $1::uuid FOR UPDATE`, userId) as WalletRow[];
   if (rows.length === 0) throw new AppError(500, 'Wallet account is not initialized', 'WALLET_MISSING');
   return rows[0];
 }

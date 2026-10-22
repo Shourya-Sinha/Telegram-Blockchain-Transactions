@@ -12,7 +12,7 @@ export async function grantAutomaticTestCredit(userId: string): Promise<boolean>
   if (!config.allowDevCredit || config.devAutoCreditMinor <= 0n) return false;
   const referenceId = `automatic:${userId}`;
   return prisma.$transaction(async (tx: Transaction) => {
-    await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"WalletAccount\" WHERE \"userId\" = $1 FOR UPDATE`, userId);
+    await tx.$queryRawUnsafe(`SELECT \"id\" FROM \"WalletAccount\" WHERE \"userId\" = $1::uuid FOR UPDATE`, userId);
     const existing = await tx.ledgerEntry.findFirst({ where: { userId, referenceType: 'DEV_CREDIT', referenceId }, select: { id: true } });
     if (existing) return false;
     const credited = await creditWallet(tx, userId, config.devAutoCreditMinor, LedgerType.TRANSFER, 'DEV_CREDIT', referenceId);
