@@ -112,7 +112,7 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
   const claimErrorMessage = claimError ? apiErrorMessage(t, claimError) : undefined;
   const detailErrorMessage = detailFailed ? apiErrorMessage(t, detail.error) : undefined;
 
-  const senderName = detail.data?.sender.firstName?.trim();
+  const senderName = detail.data?.sender?.firstName?.trim() || detail.data?.sender?.username?.trim();
   const senderTitle = senderName ? t('redEnvelopeFrom', { name: senderName }) : t('redEnvelopeGeneric');
   const claims = detail.data?.claims ?? [];
   const claimedCount = detail.data ? detail.data.totalSlots - detail.data.remainingSlots : claims.length;
@@ -190,12 +190,15 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
 
       {claims.length > 0 && <div className="hb-claims">
         <div className="hb-claims-title">{t('claimDetails')} · {claims.length}/{detail.data?.totalSlots ?? claims.length}</div>
-        {claims.map((claim) => <div className="hb-claim" key={claim.id}>
-          <span className="hb-claim-avatar">{(claim.user.firstName || '?').slice(0, 1).toUpperCase()}</span>
-          <span className="hb-claim-name">{claim.user.firstName}{claim.mine && <em>{t('youLabel')}</em>}</span>
-          <small className="hb-claim-time">{formatClock(claim.claimedAt)}</small>
-          <span className="hb-claim-amount">{formatMinor(claim.amountMinor)}</span>
-        </div>)}
+        {claims.map((claim) => {
+          const claimantName = claim.user?.firstName?.trim() || claim.user?.username?.trim() || '?';
+          return <div className="hb-claim" key={claim.id}>
+            <span className="hb-claim-avatar">{claimantName.slice(0, 1).toUpperCase()}</span>
+            <span className="hb-claim-name">{claimantName}{claim.mine && <em>{t('youLabel')}</em>}</span>
+            <small className="hb-claim-time">{formatClock(claim.claimedAt)}</small>
+            <span className="hb-claim-amount">{formatMinor(claim.amountMinor)}</span>
+          </div>;
+        })}
       </div>}
 
       {onShowLedgerDetails && <button type="button" className="hb-details-link" onClick={() => { haptic(); onShowLedgerDetails(); }}>{t('transactionDetails')} ›</button>}
