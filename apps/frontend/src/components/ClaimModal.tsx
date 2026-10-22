@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, isTerminalEnvelopeError, type ClaimResponse, type EnvelopeDetail } from '../api';
+import { ApiError, api, isTerminalEnvelopeError, type ClaimResponse, type EnvelopeDetail } from '../api';
 import { haptic, successHaptic } from '../telegram';
 import { apiErrorMessage, useT } from '../i18n';
 import { formatClock, formatDateTime, formatMinor } from './EnvelopeRow';
@@ -9,6 +9,13 @@ type Phase = 'sealed' | 'opening' | 'done';
 
 /** How long the flap/coin animation runs before the result is revealed. */
 const OPEN_ANIMATION_MS = 1250;
+const CLAIM_REQUIREMENT_ERROR_CODES = new Set([
+  'ACCOUNT_TOO_NEW', 'MESSAGE_REQUIREMENT', 'CLAIM_LIMIT', 'GROUP_DISABLED', 'ENVELOPES_DISABLED'
+]);
+
+function apiErrorCode(error: unknown): string | undefined {
+  return error instanceof ApiError ? error.code : undefined;
+}
 
 /**
  * WeChat-style red envelope screen.
@@ -23,8 +30,8 @@ const OPEN_ANIMATION_MS = 1250;
  * Two rules keep this screen from ever dead-ending:
  * 1. A failure that can be retried (network, rate limit, membership check,
  *    server error) returns the envelope to its sealed state with the reason on
- *    screen and a Try again button — only ALREADY_CLAIMED / CLOSED / EXPIRED /
- *    NOT_FOUND are final.
+ *    screen and a Try again button — audience denial, already-claimed, closed,
+ *    expired and missing envelopes are final.
  * 2. The back arrow, the × and the Done button live outside the scroll area, so
  *    however long the claim list grows they stay on screen.
  */
@@ -55,8 +62,8 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
       void client.invalidateQueries({ queryKey: ['envelope', envelopeId] });
     },
     onError: (error) => {
-      // "Already claimed", "fully claimed" and "expired" mean the server state
-      // moved on: refresh the envelope so the details below show the truth.
+      // Definitive outcomes (including audience denial) do not benefit from a
+      // retry; refresh the envelope/history to keep the visible state current.
       if (isTerminalEnvelopeError(error)) {
         void client.invalidateQueries({ queryKey: ['ledger'] });
         void detail.refetch();
@@ -65,7 +72,12 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
   });
 
   const myClaim = detail.data?.claims.find((claim) => claim.mine);
+  const claimError = mutation.isError ? mutation.error : undefined;
   const detailFailed = detail.isError;
+  const audienceDenied = apiErrorCode(detail.error) === 'ENVELOPE_NOT_ELIGIBLE'
+    || apiErrorCode(claimError) === 'ENVELOPE_NOT_ELIGIBLE';
+  const claimRequirementsNotMet = [detail.error, claimError]
+    .some((error) => CLAIM_REQUIREMENT_ERROR_CODES.has(apiErrorCode(error) ?? ''));
   const envelopeClosed = Boolean(detail.data && (detail.data.status !== 'ACTIVE' || detail.data.remainingSlots <= 0));
 
   // Anything already settled for this viewer (their own claim, a read-only
@@ -74,7 +86,7 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
     if (phase === 'sealed' && !mutation.isPending && (myClaim || viewOnly || envelopeClosed)) setPhase('done');
   }, [phase, myClaim, viewOnly, envelopeClosed, mutation.isPending]);
 
-  const canTapToClaim = phase === 'sealed' && !viewOnly && !envelopeClosed && !myClaim;
+  const canTapToClaim = phase === 'sealed' && !viewOnly && !envelopeClosed && !myClaim && !audienceDenied;
 
   const openEnvelope = () => {
     if (!canTapToClaim || mutation.isPending) return;
@@ -96,7 +108,6 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
   }, [phase, animDone, mutation.isPending, mutation.isError, mutation.error]);
 
   const claimed = mutation.data?.claim?.amountMinor ?? myClaim?.amountMinor;
-  const claimError = mutation.isError ? mutation.error : undefined;
   const retryableClaimError = Boolean(claimError) && !isTerminalEnvelopeError(claimError);
   const claimErrorMessage = claimError ? apiErrorMessage(t, claimError) : undefined;
   const detailErrorMessage = detailFailed ? apiErrorMessage(t, detail.error) : undefined;
@@ -132,7 +143,7 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
 
       <div
         className={`hb-envelope phase-${phase}`}
-        onClick={openEnvelope}
+        onClick={canTapToClaim ? openEnvelope : undefined}
         role={canTapToClaim ? 'button' : undefined}
         tabIndex={canTapToClaim ? 0 : undefined}
         onKeyDown={(event) => { if (canTapToClaim && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openEnvelope(); } }}
@@ -153,17 +164,19 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
         </div>
       </div>
 
-      <p className="hb-hint" aria-live="polite">
+      {!audienceDenied && <p className="hb-hint" aria-live="polite">
         {phase === 'sealed' && (retryableClaimError ? t('envelopeTapAgain') : t('tapToOpen'))}
         {phase === 'opening' && t('claimOpening')}
         {phase === 'done' && claimed && t('blessing')}
         {phase === 'done' && !claimed && t('envelopeHistoryHint')}
-      </p>
+      </p>}
 
-      {(retryableClaimError || detailFailed) && <div className="hb-error" role="alert">
-        <strong>{retryableClaimError ? t('claimFailedTitle') : t('envelopeLoadFailed')}</strong>
-        <span>{retryableClaimError ? claimErrorMessage : detailErrorMessage}</span>
-        {detailFailed && <button type="button" className="hb-inline-button" onClick={() => { haptic(); void detail.refetch(); }}>{t('retry')}</button>}
+      {(audienceDenied || retryableClaimError || detailFailed) && <div className="hb-error" role="alert">
+        <strong>{audienceDenied ? t('claimNotEligibleTitle') : claimRequirementsNotMet ? t('claimRequirementsTitle') : retryableClaimError ? t('claimFailedTitle') : t('envelopeLoadFailed')}</strong>
+        <span>{audienceDenied
+          ? (apiErrorCode(detail.error) === 'ENVELOPE_NOT_ELIGIBLE' ? detailErrorMessage : claimErrorMessage)
+          : retryableClaimError ? claimErrorMessage : detailErrorMessage}</span>
+        {detailFailed && !audienceDenied && <button type="button" className="hb-inline-button" onClick={() => { haptic(); void detail.refetch(); }}>{t('retry')}</button>}
       </div>}
 
       {detail.data && <div className="hb-meta">

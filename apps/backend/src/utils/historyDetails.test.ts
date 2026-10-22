@@ -48,9 +48,10 @@ test('the detail sheet can always be dismissed (back arrow, close button, backdr
 
 test('a red envelope that fails to open can be retried instead of dead-ending', () => {
   const claim = read('../frontend/src/components/ClaimModal.tsx');
-  // Only these four codes are final; everything else rewinds to the seal.
+  // Definitive results (including audience denial) stop here; transient and
+  // satisfiable requirement failures rewind to the seal so the user can retry.
   const api = read('../frontend/src/api.ts');
-  assert.match(api, /TERMINAL_ENVELOPE_CODES = \['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND'\]/);
+  assert.match(api, /TERMINAL_ENVELOPE_CODES = \['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE'\]/);
   assert.match(claim, /if \(mutation\.isError && !isTerminalEnvelopeError\(mutation\.error\)\) \{ setPhase\('sealed'\); return; \}/);
   assert.match(claim, /className="hb-retry"/);
   // A failed envelope lookup no longer locks the envelope: it offers a retry.
@@ -58,6 +59,35 @@ test('a red envelope that fails to open can be retried instead of dead-ending', 
   assert.equal(/detailUnavailable/.test(claim), false);
   // A malformed claim response must not throw while rendering.
   assert.match(claim, /mutation\.data\?\.claim\?\.amountMinor/);
+});
+
+test('unselected users see a clear audience denial and cannot tap to claim', () => {
+  const claim = read('../frontend/src/components/ClaimModal.tsx');
+  const api = read('../frontend/src/api.ts');
+  const i18n = read('../frontend/src/i18n.ts');
+  assert.match(api, /'ENVELOPE_NOT_ELIGIBLE'/);
+  assert.match(claim, /apiErrorCode\(detail\.error\) === 'ENVELOPE_NOT_ELIGIBLE'/);
+  assert.match(claim, /!audienceDenied/);
+  assert.match(claim, /onClick=\{canTapToClaim \? openEnvelope : undefined\}/);
+  assert.match(claim, /audienceDenied \|\| retryableClaimError \|\| detailFailed/);
+  assert.match(claim, /detailFailed && !audienceDenied/);
+  const css = read('../frontend/src/index.css');
+  assert.match(css, /\.hb-envelope\.phase-sealed:not\(\[role="button"\]\) \{ cursor: default; \}/);
+  assert.match(i18n, /ENVELOPE_NOT_ELIGIBLE: 'claimNotEligibleMessage'/);
+  assert.match(i18n, /claimNotEligibleTitle: 'You are not authorized to claim this envelope'/);
+  assert.match(i18n, /claimNotEligibleTitle: '您无权领取此红包'/);
+});
+
+test('unsatisfied group claim requirements have actionable localized messages', () => {
+  const claim = read('../frontend/src/components/ClaimModal.tsx');
+  const i18n = read('../frontend/src/i18n.ts');
+  for (const code of ['ACCOUNT_TOO_NEW', 'MESSAGE_REQUIREMENT', 'CLAIM_LIMIT', 'GROUP_DISABLED', 'ENVELOPES_DISABLED']) {
+    assert.ok(claim.includes(`'${code}'`), `claim UI should recognize ${code}`);
+  }
+  for (const key of ['claimAccountTooNew', 'claimMessageRequirement', 'claimDailyLimit', 'claimGroupDisabled', 'claimTemporarilyDisabled']) {
+    assert.ok(i18n.includes(`${key}:`), `claim UI is missing ${key}`);
+  }
+  assert.match(claim, /claimRequirementsNotMet \? t\('claimRequirementsTitle'\)/);
 });
 
 test('the envelope screen keeps its exits and shows the envelope details', () => {

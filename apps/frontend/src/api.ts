@@ -40,7 +40,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
  * (network blips, rate limits, membership checks, 5xx) can be retried, so the
  * envelope UI keeps its seal tappable instead of dead-ending.
  */
-const TERMINAL_ENVELOPE_CODES = ['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND'];
+const TERMINAL_ENVELOPE_CODES = ['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE'];
 export function isTerminalEnvelopeError(error: unknown): boolean {
   return error instanceof ApiError && Boolean(error.code && TERMINAL_ENVELOPE_CODES.includes(error.code));
 }
