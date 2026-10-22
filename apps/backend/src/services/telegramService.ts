@@ -317,3 +317,23 @@ export async function assertTelegramGroupMembership(groupId: bigint, telegramId:
     throw new AppError(403, 'Unable to verify group membership. Ask an admin to make the bot a group administrator.', 'MEMBERSHIP_UNVERIFIED');
   }
 }
+
+/**
+ * Resolve a known numeric ID only when Telegram confirms that its current
+ * group profile still has the requested username. The Bot API cannot look up
+ * arbitrary usernames, so callers must first find the ID in a known profile.
+ */
+export async function getVerifiedTelegramGroupUsername(
+  groupId: bigint,
+  telegramId: bigint,
+  requestedUsername: string
+): Promise<string | null> {
+  try {
+    const member = await readMembership(groupId, telegramId);
+    const username = member.user.username;
+    if (!isCurrentTelegramMember(member) || member.user.is_bot || !username) return null;
+    return username.toLowerCase() === requestedUsername.toLowerCase() ? username : null;
+  } catch {
+    return null;
+  }
+}
