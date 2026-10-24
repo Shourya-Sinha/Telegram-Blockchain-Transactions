@@ -6,8 +6,10 @@
   "scripts": {
     "predev": "npm run prisma:generate && npm run build --workspace=@red-envelope/shared",
     "dev": "tsx watch src/server.ts",
+    "prebuild": "npm run prisma:generate",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
+    "pretypecheck": "npm run prisma:generate",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "prisma:generate": "prisma generate",
