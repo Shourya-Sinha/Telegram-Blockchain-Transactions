@@ -52,6 +52,7 @@ function EnvelopesPage() {
   const [expiresInMinutes, setExpiresInMinutes] = useState(1440);
   const [audience, setAudience] = useState<'ALL' | 'SELECTED'>('SELECTED');
   const [eligibleTelegramIds, setEligibleTelegramIds] = useState<string[]>([]);
+  const [eligibleTelegramUsernames, setEligibleTelegramUsernames] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [messageTone, setMessageTone] = useState<'success' | 'danger'>('danger');
   const [treasuryAmount, setTreasuryAmount] = useState('1000');
@@ -78,7 +79,7 @@ function EnvelopesPage() {
   const send = useMutation({
     mutationFn: () => adminApi<{ envelope: { id: string } }>('/api/admin/envelopes/send', {
       method: 'POST',
-      body: JSON.stringify({ groupId, total, count, mode, expiresInMinutes, audience, eligibleTelegramIds: audience === 'SELECTED' ? eligibleTelegramIds : [] })
+      body: JSON.stringify({ groupId, total, count, mode, expiresInMinutes, audience, eligibleTelegramIds: audience === 'SELECTED' ? eligibleTelegramIds : [], eligibleUsernames: audience === 'SELECTED' ? eligibleTelegramUsernames : [] })
     }),
     onSuccess: (result) => {
       setMessage(t('envelopePosted', result.envelope.id.slice(0, 8)));
@@ -94,21 +95,21 @@ function EnvelopesPage() {
   });
   const groups = setup.data?.groups.filter((group) => group.enabled) ?? [];
   const groupName = (id: string) => setup.data?.groups.find((group) => group.chatId === id)?.title ?? id;
-  const audienceReady = audience === 'ALL' || eligibleTelegramIds.length > 0;
+  const audienceReady = audience === 'ALL' || eligibleTelegramIds.length + eligibleTelegramUsernames.length > 0;
   return <PageFrame title={t('sendEnvelopeTitle')} subtitle={t('sendEnvelopeSubtitle')}>
     {setup.isError && <div className="alert danger">{(setup.error as Error).message}</div>}
     {setup.data && !setup.data.configured && <div className="alert danger">{setup.data.configurationMessage}</div>}
     <div className="envelope-admin-grid">
       <section className="panel settings-panel envelope-form">
         <div className="panel-head"><div><h2>{t('newGroupEnvelope')}</h2><p>{t('newGroupEnvelopeNote')}</p></div><span className="settings-icon">🧧</span></div>
-        <label>{t('destinationGroup')}<select value={groupId} onChange={(event) => { setGroupId(event.target.value); setEligibleTelegramIds([]); }}><option value="">{t('selectRegisteredGroup')}</option>{groups.map((group) => <option key={group.id} value={group.chatId}>{group.title ?? group.username ?? group.chatId} ({group.chatId}) · {group._count?.members ?? 0} {t('knownMembers')}</option>)}</select></label>
+        <label>{t('destinationGroup')}<select value={groupId} onChange={(event) => { setGroupId(event.target.value); setEligibleTelegramIds([]); setEligibleTelegramUsernames([]); }}><option value="">{t('selectRegisteredGroup')}</option>{groups.map((group) => <option key={group.id} value={group.chatId}>{group.title ?? group.username ?? group.chatId} ({group.chatId}) · {group._count?.members ?? 0} {t('knownMembers')}</option>)}</select></label>
         {!groups.length && <div className="info-callout"><strong>{t('noRegisteredGroups')}</strong><p>{t('noRegisteredGroupsHint')}</p></div>}
         <div className="settings-grid"><label>{t('totalUsdt')}<input value={total} inputMode="decimal" onChange={(event) => setTotal(event.target.value)} /></label><label>{t('numberOfClaims')}<input type="number" min="1" max="500" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label><label>{t('distribution')}<select value={mode} onChange={(event) => setMode(event.target.value as 'RANDOM' | 'EQUAL')}><option value="RANDOM">{t('randomShares')}</option><option value="EQUAL">{t('equalShares')}</option></select></label></div>
         <label>{t('expires')}<select value={expiresInMinutes} onChange={(event) => setExpiresInMinutes(Number(event.target.value))}><option value={60}>{t('inOneHour')}</option><option value={1440}>{t('in24Hours')}</option><option value={10080}>{t('in7Days')}</option></select></label>
         <label className="audience-field">{t('claimAudience')}<select value={audience} onChange={(event) => { setAudience(event.target.value as 'ALL' | 'SELECTED'); setMessage(''); }}><option value="SELECTED">{t('selectedMembersOnly')}</option><option value="ALL">{t('allGroupMembers')}</option></select></label>
-        {audience === 'SELECTED' && groupId && <GroupMemberPicker key={groupId} groupId={groupId} selectedTelegramIds={eligibleTelegramIds} onSelectionChange={setEligibleTelegramIds} />}
+        {audience === 'SELECTED' && groupId && <GroupMemberPicker key={groupId} groupId={groupId} selectedTelegramIds={eligibleTelegramIds} onSelectionChange={setEligibleTelegramIds} selectedTelegramUsernames={eligibleTelegramUsernames} onUsernamesChange={setEligibleTelegramUsernames} />}
         {audience === 'SELECTED' && !groupId && <div className="info-callout"><strong>{t('selectGroupForMembers')}</strong><p>{t('selectGroupForMembersHint')}</p></div>}
-        {audience === 'SELECTED' && groupId && eligibleTelegramIds.length === 0 && <div className="selection-required">{t('selectAtLeastOneEligible')}</div>}
+        {audience === 'SELECTED' && groupId && eligibleTelegramIds.length + eligibleTelegramUsernames.length === 0 && <div className="selection-required">{t('selectAtLeastOneEligible')}</div>}
         <div className="treasury-line"><span>{t('treasuryWallet')}</span><strong>{setup.data?.treasury ? t('usdtAvailable', money(setup.data.treasury.wallet?.availableMinor)) : setup.data?.treasuryTelegramIdConfigured ? t('idConfigured') : t('telegramIdNotConfigured')}</strong></div>
         {setup.data?.treasury && <div className="treasury-topup">
           {testing.data?.testCreditEnabled
@@ -125,7 +126,7 @@ function EnvelopesPage() {
       </section>
       <div className="info-callout envelope-help"><strong>{t('whatMembersSee')}</strong><p>{t('whatMembersSeeText')}</p></div>
     </div>
-    <section className="panel table-panel envelope-history"><div className="panel-head"><div><h2>{t('recentEnvelopes')}</h2><p>{t('recentEnvelopesNote')}</p></div></div><table><thead><tr><th>{t('colEnvelope')}</th><th>{t('colGroup')}</th><th>{t('colAmount')}</th><th>{t('colClaims')}</th><th>{t('colMode')}</th><th>{t('colAudience')}</th><th>{t('colStatus')}</th></tr></thead><tbody>{setup.data?.recent.map((item) => <tr key={item.id}><td><strong>#{item.id.slice(0, 8)}</strong><small>{date(item.createdAt)}</small></td><td><strong>{groupName(item.groupId)}</strong><small>{item.groupId}</small></td><td><strong>{money(item.totalMinor)} USDT</strong><small>{money(item.remainingMinor)} {t('remaining')}</small></td><td>{item._count.claims} / {item.totalSlots}</td><td>{item.mode === 'RANDOM' ? t('randomShares') : t('equalShares')}</td><td><strong>{item.audience === 'SELECTED' ? t('selectedMembersOnly') : t('allGroupMembers')}</strong>{item.audience === 'SELECTED' && <small>{t('selectedMemberCount', item._count.eligibleUsers)}</small>}</td><td><Status status={item.status} /></td></tr>)}</tbody></table>{!setup.data?.recent.length && <Empty text={t('noEnvelopesYet')} />}</section>
+    <section className="panel table-panel envelope-history"><div className="panel-head"><div><h2>{t('recentEnvelopes')}</h2><p>{t('recentEnvelopesNote')}</p></div></div><table><thead><tr><th>{t('colEnvelope')}</th><th>{t('colGroup')}</th><th>{t('colAmount')}</th><th>{t('colClaims')}</th><th>{t('colMode')}</th><th>{t('colAudience')}</th><th>{t('colStatus')}</th></tr></thead><tbody>{setup.data?.recent.map((item) => <tr key={item.id}><td><strong>#{item.id.slice(0, 8)}</strong><small>{date(item.createdAt)}</small></td><td><strong>{groupName(item.groupId)}</strong><small>{item.groupId}</small></td><td><strong>{money(item.totalMinor)} USDT</strong><small>{money(item.remainingMinor)} {t('remaining')}</small></td><td>{item._count.claims} / {item.totalSlots}</td><td>{item.mode === 'RANDOM' ? t('randomShares') : t('equalShares')}</td><td><strong>{item.audience === 'SELECTED' ? t('selectedMembersOnly') : t('allGroupMembers')}</strong>{item.audience === 'SELECTED' && <small>{t('selectedMemberCount', item._count.eligibleUsers + item._count.eligibleUsernames)}</small>}</td><td><Status status={item.status} /></td></tr>)}</tbody></table>{!setup.data?.recent.length && <Empty text={t('noEnvelopesYet')} />}</section>
   </PageFrame>;
 }
 

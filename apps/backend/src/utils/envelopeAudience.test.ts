@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { createEnvelopeSchema, telegramUsernameSchema } from '@red-envelope/shared';
-import { isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds } from './envelopeAudience';
+import { isEligibleUsernameRecipient, isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds, normalizeEligibleTelegramUsernames } from './envelopeAudience';
 
 test('new envelope requests default to the legacy unrestricted audience', () => {
   const parsed = createEnvelopeSchema.parse({ total: '10', count: 2, groupId: '-1001234567890' });
   assert.equal(parsed.audience, 'ALL');
   assert.deepEqual(parsed.eligibleTelegramIds, []);
+  assert.deepEqual(parsed.eligibleUsernames, []);
 });
 
 test('selected audience accepts bounded positive decimal Telegram IDs only', () => {
@@ -30,14 +31,61 @@ test('Telegram usernames allow an optional @ and normalize to lowercase', () => 
   assert.equal(telegramUsernameSchema.safeParse('https://t.me/alice').success, false);
 });
 
+test('selected envelopes accept a bounded mix of Telegram IDs and deferred username reservations', () => {
+  const parsed = createEnvelopeSchema.parse({
+    total: '10', count: 2, groupId: '-1001234567890', audience: 'SELECTED',
+    eligibleTelegramIds: ['123456789'], eligibleUsernames: ['@Alice_123', 'alice_123']
+  });
+  assert.deepEqual(parsed.eligibleUsernames, ['alice_123', 'alice_123']);
+  assert.deepEqual(normalizeEligibleTelegramUsernames('SELECTED', parsed.eligibleUsernames), ['alice_123']);
+  assert.deepEqual(normalizeEligibleTelegramUsernames('ALL', ['@Alice_123']), []);
+
+  const overLimit = createEnvelopeSchema.safeParse({
+    total: '10', count: 2, groupId: '-1001234567890', audience: 'SELECTED',
+    eligibleTelegramIds: Array.from({ length: 300 }, (_, index) => String(index + 1)),
+    eligibleUsernames: Array.from({ length: 201 }, (_, index) => `user_${index}`)
+  });
+  assert.equal(overLimit.success, false);
+});
+
+test('username reservations bind to the first verified claimant ID and stay bound after a rename', () => {
+  const pending = { username: 'alice_123', telegramId: null };
+  assert.equal(isEligibleUsernameRecipient(pending, { telegramId: 42n, username: '@Alice_123' }), true);
+  assert.equal(isEligibleUsernameRecipient(pending, { telegramId: 43n, username: 'alice_123' }), true);
+  const bound = { username: 'alice_123', telegramId: 42n };
+  assert.equal(isEligibleUsernameRecipient(bound, { telegramId: 42n, username: 'alice_new' }), true);
+  assert.equal(isEligibleUsernameRecipient(bound, { telegramId: 43n, username: 'alice_123' }), false);
+});
+
 test('username resolution looks up known profiles and verifies the current Telegram username', () => {
   const routes = readFileSync(resolve(process.cwd(), 'src/routes/adminRoutes.ts'), 'utf8');
   const telegram = readFileSync(resolve(process.cwd(), 'src/services/telegramService.ts'), 'utf8');
   assert.match(routes, /groups\/:chatId\/resolve-usernames/);
   assert.match(routes, /prisma\.groupMember\.findMany/);
   assert.match(routes, /prisma\.user\.findMany/);
+  assert.match(routes, /res\.json\(\{ resolved, unresolved \}\)/);
   assert.match(telegram, /member\.user\.username/);
   assert.match(telegram, /requestedUsername\.toLowerCase\(\)/);
+});
+
+test('admin recipient selector retains profile and numeric-ID selection while adding unknown usernames', () => {
+  const picker = readFileSync(resolve(process.cwd(), '../admin/src/components/GroupMemberPicker.tsx'), 'utf8');
+  const createForm = readFileSync(resolve(process.cwd(), '../admin/src/App.tsx'), 'utf8');
+  const service = readFileSync(resolve(process.cwd(), 'src/services/envelopeService.ts'), 'utf8');
+  assert.match(picker, /members\.map\(\(member\)/);
+  assert.match(picker, /const addManualIds/);
+  assert.match(picker, /result\.unresolved/);
+  assert.match(createForm, /eligibleUsernames: audience === 'SELECTED' \? eligibleTelegramUsernames/);
+  assert.match(service, /tx\.redEnvelopeEligibleUsername\.createMany/);
+});
+
+test('first eligible username claim is bound to the Telegram-authenticated numeric ID', () => {
+  const claims = readFileSync(resolve(process.cwd(), 'src/services/envelopeService.ts'), 'utf8');
+  const eligibility = readFileSync(resolve(process.cwd(), 'src/services/eligibilityService.ts'), 'utf8');
+  assert.match(claims, /redEnvelopeEligibleUsername\.updateMany/);
+  assert.match(claims, /telegramId: claimant\.telegramId, boundAt: new Date\(\)/);
+  assert.match(claims, /RED_ENVELOPE_USERNAME_BOUND/);
+  assert.match(eligibility, /isEnvelopeRecipientSelected\(prisma, envelopeId, user\)/);
 });
 
 test('selected audience caps its allowlist at 500 IDs', () => {

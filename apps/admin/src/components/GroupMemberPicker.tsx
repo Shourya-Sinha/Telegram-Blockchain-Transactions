@@ -24,11 +24,15 @@ function isValidTelegramUsername(value: string): boolean {
 export function GroupMemberPicker({
   groupId,
   selectedTelegramIds,
-  onSelectionChange
+  onSelectionChange,
+  selectedTelegramUsernames,
+  onUsernamesChange
 }: {
   groupId: string;
   selectedTelegramIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  selectedTelegramUsernames: string[];
+  onUsernamesChange: (usernames: string[]) => void;
 }) {
   const t = useT();
   const [search, setSearch] = useState('');
@@ -43,6 +47,9 @@ export function GroupMemberPicker({
   const mountedRef = useRef(true);
   const selectedIdsRef = useRef(selectedTelegramIds);
   selectedIdsRef.current = selectedTelegramIds;
+  const selectedUsernamesRef = useRef(selectedTelegramUsernames);
+  selectedUsernamesRef.current = selectedTelegramUsernames;
+  const selectedRecipientCount = selectedTelegramIds.length + selectedTelegramUsernames.length;
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -63,7 +70,7 @@ export function GroupMemberPicker({
   const page = Math.floor(offset / PICKER_PAGE_SIZE) + 1;
 
   const toggleMember = (telegramId: string) => {
-    if (!selected.has(telegramId) && selectedTelegramIds.length >= MAX_ELIGIBLE_RECIPIENTS) {
+    if (!selected.has(telegramId) && selectedRecipientCount >= MAX_ELIGIBLE_RECIPIENTS) {
       setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
       return;
     }
@@ -78,7 +85,7 @@ export function GroupMemberPicker({
     const nextIds = pageFullySelected
       ? selectedTelegramIds.filter((id) => !visibleIds.has(id))
       : [...new Set([...selectedTelegramIds, ...pageIds])];
-    if (nextIds.length > MAX_ELIGIBLE_RECIPIENTS) {
+    if (nextIds.length + selectedTelegramUsernames.length > MAX_ELIGIBLE_RECIPIENTS) {
       setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
       return;
     }
@@ -98,7 +105,7 @@ export function GroupMemberPicker({
     }
     const newIds = [...new Set(rawIds.map((id) => BigInt(id).toString()))];
     const nextIds = [...new Set([...selectedTelegramIds, ...newIds])];
-    if (nextIds.length > MAX_ELIGIBLE_RECIPIENTS) {
+    if (nextIds.length + selectedTelegramUsernames.length > MAX_ELIGIBLE_RECIPIENTS) {
       setManualIdError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
       return;
     }
@@ -126,18 +133,23 @@ export function GroupMemberPicker({
     setResolvingUsernames(true);
     setManualUsernameError('');
     try {
-      const result = await adminApi<{ resolved: Array<{ username: string; telegramId: string }> }>(
+      const result = await adminApi<{ resolved: Array<{ username: string; telegramId: string }>; unresolved: string[] }>(
         `/api/admin/groups/${encodeURIComponent(groupId)}/resolve-usernames`,
         { method: 'POST', body: JSON.stringify({ usernames }) }
       );
       if (!mountedRef.current) return;
       const resolvedIds = [...new Set(result.resolved.map((recipient) => recipient.telegramId))];
       const nextIds = [...new Set([...selectedIdsRef.current, ...resolvedIds])];
-      if (nextIds.length > MAX_ELIGIBLE_RECIPIENTS) {
+      const resolvedUsernames = new Set(result.resolved.map(({ username }) => username.replace(/^@/, '').toLowerCase()));
+      const unresolved = [...new Set(result.unresolved.map((username) => username.toLowerCase()))];
+      const retainedUsernames = selectedUsernamesRef.current.filter((username) => !resolvedUsernames.has(username));
+      const nextUsernames = [...new Set([...retainedUsernames, ...unresolved])];
+      if (nextIds.length + nextUsernames.length > MAX_ELIGIBLE_RECIPIENTS) {
         setManualUsernameError(t('maxEligibleRecipients', MAX_ELIGIBLE_RECIPIENTS));
         return;
       }
       onSelectionChange(nextIds);
+      onUsernamesChange(nextUsernames);
       setManuallyAddedIds((current) => [...new Set([...current, ...resolvedIds])]);
       setManualRecipientLabels((current) => ({
         ...current,
@@ -162,10 +174,14 @@ export function GroupMemberPicker({
     setManualIdError('');
     setManualUsernameError('');
   };
+  const removeManualUsername = (username: string) => {
+    onUsernamesChange(selectedTelegramUsernames.filter((value) => value !== username));
+    setManualUsernameError('');
+  };
 
   return <section className="audience-member-picker">
     <div className="picker-header">
-      <div><strong>{t('chooseEligibleMembers')}</strong><p>{t('selectedMemberCount', selectedTelegramIds.length)}</p></div>
+      <div><strong>{t('chooseEligibleMembers')}</strong><p>{t('selectedMemberCount', selectedRecipientCount)}</p></div>
       <button type="button" className="refresh-button" onClick={() => void query.refetch()}>{t('refreshRoster')}</button>
     </div>
     <p className="picker-note">{t('eligibleMembersNote')}</p>
@@ -208,6 +224,13 @@ export function GroupMemberPicker({
         {manualRecipientLabels[id] && <small>{manualRecipientLabels[id]}</small>}
         <code>{id}</code>
         <button type="button" aria-label={t('removeSelectedTelegramId', id)} onClick={() => removeManualId(id)}>×</button>
+      </span>)}
+    </div>}
+    {selectedTelegramUsernames.length > 0 && <div className="manual-id-chips">
+      {selectedTelegramUsernames.map((username) => <span className="manual-id-chip" key={username} title={t('usernameBoundAtFirstClaim')}>
+        <code>@{username}</code>
+        <small>{t('pendingUsernameRecipient')}</small>
+        <button type="button" aria-label={t('removeSelectedUsername', username)} onClick={() => removeManualUsername(username)}>×</button>
       </span>)}
     </div>}
     <div className="picker-toolbar">

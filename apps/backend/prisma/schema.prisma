@@ -129,8 +129,9 @@ model RedEnvelope {
   expiresAt      DateTime
   createdAt      DateTime        @default(now())
   sender         User            @relation("EnvelopeSender", fields: [senderId], references: [id], onDelete: Restrict)
-  claims         RedEnvelopeClaim[]
-  eligibleUsers  RedEnvelopeEligibleUser[]
+  claims             RedEnvelopeClaim[]
+  eligibleUsers      RedEnvelopeEligibleUser[]
+  eligibleUsernames  RedEnvelopeEligibleUsername[]
   @@index([groupId, createdAt])
   @@index([status, expiresAt])
 }
@@ -218,6 +219,11 @@ model GroupSetting {
   minMessages       Int      @default(0)
   maxClaimsPerDay   Int      @default(10)
   members           GroupMember[]
+  deletionRequestedAt DateTime?
+  archivedAt         DateTime?
+
+  @@index([deletionRequestedAt])
+  @@index([archivedAt])
 }
 
 /** A Telegram profile observed in group updates; phone numbers are not available from the Bot API. */
@@ -252,5 +258,19 @@ model RedEnvelopeEligibleUser {
   envelope   RedEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
 
   @@id([envelopeId, telegramId])
+  @@index([telegramId])
+}
+
+/** Username reservations for recipients not yet known by numeric Telegram ID. */
+model RedEnvelopeEligibleUsername {
+  envelopeId String      @db.Uuid
+  username   String
+  telegramId BigInt?
+  createdAt  DateTime    @default(now())
+  boundAt    DateTime?
+  envelope   RedEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@id([envelopeId, username])
+  @@unique([envelopeId, telegramId])
   @@index([telegramId])
 }

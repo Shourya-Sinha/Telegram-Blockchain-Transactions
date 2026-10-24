@@ -1,20 +1,26 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi, type GroupRoster, type GroupSetting } from '../api';
 import { groupMemberDisplayName } from '../utils/groupMemberDisplay';
 import { useT } from '../i18n';
 
 const PAGE_SIZE = 50;
 const dateTime = (value: string) => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+type GroupAction = 'remove' | 'cancel-removal' | 'restore';
 
 export function GroupsPage() {
   const t = useT();
+  const client = useQueryClient();
   const [selectedChatId, setSelectedChatId] = useState('');
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
+  const [actionTone, setActionTone] = useState<'success' | 'danger' | 'warning'>('success');
   const groupsQuery = useQuery({
-    queryKey: ['admin-groups'],
-    queryFn: () => adminApi<GroupSetting[]>('/api/admin/groups')
+    queryKey: ['admin-groups', showArchived],
+    queryFn: () => adminApi<GroupSetting[]>(`/api/admin/groups${showArchived ? '?includeArchived=true' : ''}`),
+    refetchInterval: 30_000
   });
   const groups = groupsQuery.data ?? [];
   const selectedGroup = groups.find((group) => group.chatId === selectedChatId) ?? groups[0];
@@ -28,12 +34,63 @@ export function GroupsPage() {
   const roster = rosterQuery.data;
   const pageCount = roster ? Math.max(1, Math.ceil(roster.total / PAGE_SIZE)) : 1;
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
-
+  const groupAction = useMutation({
+    mutationFn: ({ chatId, action }: { chatId: string; action: GroupAction }) => adminApi<{ status: string; activeEnvelopes?: number }>(
+      action === 'remove'
+        ? `/api/admin/groups/${encodeURIComponent(chatId)}`
+        : `/api/admin/groups/${encodeURIComponent(chatId)}/${action}`,
+      { method: action === 'remove' ? 'DELETE' : 'POST' }
+    ),
+    onSuccess: (result, variables) => {
+      if (variables.action === 'remove' && result.status === 'PENDING') {
+        setActionMessage(t('groupRemovalScheduled', result.activeEnvelopes ?? 0));
+        setActionTone('warning');
+      } else if (variables.action === 'remove') {
+        setActionMessage(t('groupRemoved'));
+        setActionTone('success');
+        setSelectedChatId('');
+      } else if (variables.action === 'cancel-removal') {
+        setActionMessage(t('groupRemovalCancelled'));
+        setActionTone('success');
+      } else {
+        setActionMessage(t('groupRestored'));
+        setActionTone('success');
+      }
+      void client.invalidateQueries({ queryKey: ['admin-groups'] });
+      void client.invalidateQueries({ queryKey: ['admin-group-members'] });
+      void client.invalidateQueries({ queryKey: ['envelope-setup'] });
+      void client.invalidateQueries({ queryKey: ['groups'] });
+    },
+    onError: (error) => {
+      setActionMessage(error instanceof Error ? error.message : t('unableToUpdateGroup'));
+      setActionTone('danger');
+    }
+  });
   const selectGroup = (chatId: string) => {
     setSelectedChatId(chatId);
     setSearch('');
     setOffset(0);
+    setActionMessage('');
   };
+  const selectedName = selectedGroup?.title ?? (selectedGroup?.username ? `@${selectedGroup.username}` : t('unnamedGroup'));
+  const selectedIsArchived = Boolean(selectedGroup?.archivedAt);
+  const selectedIsPendingRemoval = Boolean(selectedGroup?.deletionRequestedAt);
+  const performGroupAction = () => {
+    if (!selectedGroup) return;
+    if (selectedIsPendingRemoval) {
+      if (window.confirm(t('confirmCancelGroupRemoval', selectedName))) groupAction.mutate({ chatId: selectedGroup.chatId, action: 'cancel-removal' });
+    } else if (selectedIsArchived) {
+      if (window.confirm(t('confirmRestoreGroup', selectedName))) groupAction.mutate({ chatId: selectedGroup.chatId, action: 'restore' });
+    } else if (window.confirm(t('confirmRemoveGroup', selectedName))) {
+      groupAction.mutate({ chatId: selectedGroup.chatId, action: 'remove' });
+    }
+  };
+  const statusText = (group: GroupSetting) => group.archivedAt ? t('groupArchived')
+    : group.deletionRequestedAt ? t('groupRemovalPending')
+      : group.enabled ? t('groupAvailable') : t('groupDisabled');
+  const statusClass = (group: GroupSetting) => group.archivedAt ? 'banned'
+    : group.deletionRequestedAt ? 'queued'
+      : group.enabled ? 'active' : 'failed';
 
   return <div className="page-content">
     <header className="page-header">
@@ -42,13 +99,20 @@ export function GroupsPage() {
     </header>
 
     {groupsQuery.isError && <div className="alert danger">{(groupsQuery.error as Error).message}</div>}
+    {actionMessage && <div className={`alert ${actionTone}`}>{actionMessage}</div>}
     <div className="info-callout group-roster-notice"><strong>{t('telegramRosterLimitationsTitle')}</strong><p>{t('telegramRosterLimitations')}</p></div>
 
     <div className="group-directory">
       <section className="panel group-directory-list">
-        <div className="panel-head"><div><h2>{t('registeredGroups')}</h2><p>{t('registeredGroupsNote')}</p></div><span className="group-total">{groups.length}</span></div>
+        <div className="panel-head">
+          <div><h2>{t('registeredGroups')}</h2><p>{t('registeredGroupsNote')}</p></div>
+          <div className="group-list-actions">
+            <button className="refresh-button" onClick={() => setShowArchived((value) => !value)}>{showArchived ? t('hideArchivedGroups') : t('showArchivedGroups')}</button>
+            <span className="group-total">{groups.length}</span>
+          </div>
+        </div>
         {groupsQuery.isLoading && <p className="directory-state">{t('loadingGroups')}</p>}
-        {!groupsQuery.isLoading && groups.length === 0 && <div className="directory-state">{t('noRegisteredGroups')}</div>}
+        {!groupsQuery.isLoading && groups.length === 0 && <div className="directory-state">{showArchived ? t('noArchivedGroups') : t('noRegisteredGroups')}</div>}
         <div className="group-cards">
           {groups.map((group) => {
             const count = group._count?.members ?? 0;
@@ -56,7 +120,7 @@ export function GroupsPage() {
             return <button type="button" key={group.id} className={`group-card ${selected ? 'selected' : ''}`} onClick={() => selectGroup(group.chatId)}>
               <span className="group-card-icon">▦</span>
               <span className="group-card-main"><strong>{group.title ?? (group.username ? `@${group.username}` : t('unnamedGroup'))}</strong><code>{group.chatId}</code></span>
-              <span className="group-card-count"><strong>{count}</strong><small>{t('knownMembers')}</small></span>
+              <span className="group-card-count"><strong>{count}</strong><small>{t('knownMembers')}</small><small className={`status ${statusClass(group)}`}>{statusText(group)}</small></span>
             </button>;
           })}
         </div>
@@ -67,9 +131,16 @@ export function GroupsPage() {
           ? <div className="directory-state">{t('selectGroupToViewMembers')}</div>
           : <>
             <div className="panel-head group-member-head">
-              <div><h2>{selectedGroup.title ?? (selectedGroup.username ? `@${selectedGroup.username}` : t('unnamedGroup'))}</h2><p>{t('telegramGroupId')}: <code>{selectedGroup.chatId}</code></p></div>
-              <span className="group-total">{roster?.total ?? selectedGroup._count?.members ?? 0} {t('knownMembers')}</span>
+              <div><h2>{selectedName}</h2><p>{t('telegramGroupId')}: <code>{selectedGroup.chatId}</code></p></div>
+              <div className="group-detail-actions">
+                <span className={`status ${statusClass(selectedGroup)}`}>{statusText(selectedGroup)}</span>
+                <button className={`table-action ${selectedIsArchived || selectedIsPendingRemoval ? '' : 'danger-action'}`} disabled={groupAction.isPending} onClick={performGroupAction}>
+                  {groupAction.isPending ? t('saving') : selectedIsArchived ? t('restoreGroup') : selectedIsPendingRemoval ? t('cancelGroupRemoval') : t('removeGroup')}
+                </button>
+              </div>
             </div>
+            {selectedIsPendingRemoval && <div className="alert warning">{t('groupPendingRemovalNote')}</div>}
+            {selectedIsArchived && <div className="info-callout"><strong>{t('groupArchived')}</strong><p>{t('groupArchivedNote')}</p></div>}
             <div className="group-member-toolbar">
               <label className="search-box"><span>⌕</span><input aria-label={t('searchGroupMembers')} placeholder={t('searchGroupMembers')} value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} /></label>
               <button className="refresh-button" onClick={() => void rosterQuery.refetch()}>{t('refreshRoster')}</button>
@@ -94,7 +165,7 @@ export function GroupsPage() {
                 })}</tbody>
               </table>
               {rosterQuery.isLoading && <div className="directory-state">{t('loadingMembers')}</div>}
-              {!rosterQuery.isLoading && roster && roster.members.length === 0 && <div className="directory-state">{t('noGroupMembersMatch')}</div>}
+              {!rosterQuery.isLoading && roster && roster.members.length === 0 && <div className="directory-state">{search.trim() ? t('noGroupMembersMatch') : t('noObservedMembers')}</div>}
             </div>
             {roster && roster.total > 0 && <div className="pagination-row">
               <span>{t('showingMembers', offset + 1, Math.min(offset + PAGE_SIZE, roster.total), roster.total)}</span>

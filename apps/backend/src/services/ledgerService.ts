@@ -9,8 +9,8 @@ type WalletRow = { id: string; availableMinor: bigint; lockedMinor: bigint; vers
 export async function ensureWalletForTelegram(identity: { telegramId: bigint; username?: string; firstName: string }) {
   const user = await prisma.user.upsert({
     where: { telegramId: identity.telegramId },
-    update: { username: identity.username, firstName: identity.firstName },
-    create: { telegramId: identity.telegramId, username: identity.username, firstName: identity.firstName, wallet: { create: {} } },
+    update: { username: identity.username ?? null, firstName: identity.firstName },
+    create: { telegramId: identity.telegramId, username: identity.username ?? null, firstName: identity.firstName, wallet: { create: {} } },
     include: { wallet: true }
   });
   if (user.status === 'BANNED') throw new AppError(403, 'This Telegram account is banned', 'BANNED');

@@ -199,12 +199,14 @@ export function createTelegramBot(): Bot {
       await ctx.reply('Run /registergroup inside the Telegram group where envelopes should be posted.');
       return;
     }
-    // const group = await registerTelegramGroup(ctx.chat);
-    // await ctx.reply(`✅ Group registered\n${group?.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`, { parse_mode: 'HTML' });
-    await registerTelegramGroup(ctx.chat);
+    const group = await registerTelegramGroup(ctx.chat);
+    if (!group) {
+      await ctx.reply('This group is archived in the admin console. Ask an admin to restore it before registering it again.');
+      return;
+    }
 
     await ctx.reply(
-      `✅ Group registered\n${ctx.chat.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`,
+      `✅ Group registered\n${group.title ?? ctx.chat.title ?? 'This group'}\nID: <code>${ctx.chat.id}</code>`,
       { parse_mode: 'HTML' }
     );
   });
