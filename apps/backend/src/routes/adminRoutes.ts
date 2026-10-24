@@ -13,7 +13,7 @@ import { creditWallet, writeAudit } from '../services/ledgerService';
 import { redis } from '../lib/redis';
 import { formatMinor, jsonSafe, parseUsdtToMinor, telegramUserIdSchema, telegramUsernameSchema } from '@red-envelope/shared';
 import { createAndPublishEnvelope } from '../services/envelopePublishingService';
-import { listRegisteredGroups } from '../services/groupService';
+import { cancelGroupRemoval, listRegisteredGroups, requestGroupRemoval, restoreArchivedGroup } from '../services/groupService';
 import { AppError } from '../utils/errors';
 import { verifyTotp } from '../utils/totp';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -53,7 +53,7 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   const recent = await prisma.redEnvelope.findMany({
     include: {
       sender: { select: { telegramId: true, firstName: true, username: true } },
-      _count: { select: { claims: true, eligibleUsers: true } }
+      _count: { select: { claims: true, eligibleUsers: true, eligibleUsernames: true } }
     },
     orderBy: { createdAt: 'desc' },
     take: 25
@@ -74,8 +74,24 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   }));
 }));
 
-adminRouter.get('/groups', asyncHandler(async (_req, res) => {
-  res.json(jsonSafe(await listRegisteredGroups()));
+adminRouter.get('/groups', asyncHandler(async (req, res) => {
+  const includeArchived = req.query.includeArchived === 'true';
+  res.json(jsonSafe(await listRegisteredGroups({ includePendingDeletion: true, includeArchived })));
+}));
+
+adminRouter.delete('/groups/:chatId', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.SUPPORT), asyncHandler(async (req, res) => {
+  const chatId = BigInt(z.string().max(20).regex(/^-?\d+$/).parse(String(req.params.chatId)));
+  res.json(await requestGroupRemoval(chatId, req.adminUser!.id, req.ip));
+}));
+
+adminRouter.post('/groups/:chatId/cancel-removal', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.SUPPORT), asyncHandler(async (req, res) => {
+  const chatId = BigInt(z.string().max(20).regex(/^-?\d+$/).parse(String(req.params.chatId)));
+  res.json(await cancelGroupRemoval(chatId, req.adminUser!.id, req.ip));
+}));
+
+adminRouter.post('/groups/:chatId/restore', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.SUPPORT), asyncHandler(async (req, res) => {
+  const chatId = BigInt(z.string().max(20).regex(/^-?\d+$/).parse(String(req.params.chatId)));
+  res.json(await restoreArchivedGroup(chatId, req.adminUser!.id, req.ip));
 }));
 
 adminRouter.get('/groups/:chatId/members', asyncHandler(async (req, res) => {
@@ -121,8 +137,9 @@ adminRouter.post('/groups/:chatId/resolve-usernames', asyncHandler(async (req, r
   const payload = z.object({ usernames: z.array(telegramUsernameSchema).min(1).max(500) }).parse(req.body);
   const usernames = [...new Set(payload.usernames)];
   const chatId = BigInt(chatIdText);
-  const group = await prisma.groupSetting.findUnique({ where: { chatId }, select: { chatId: true } });
-  if (!group) throw new AppError(404, 'Telegram group not found', 'GROUP_NOT_FOUND');
+  const group = await prisma.groupSetting.findUnique({ where: { chatId }, select: { chatId: true, deletionRequestedAt: true, archivedAt: true } });
+  if (!group || group.archivedAt) throw new AppError(404, 'Telegram group not found', 'GROUP_NOT_FOUND');
+  if (group.deletionRequestedAt) throw new AppError(409, 'This group is scheduled for removal and cannot receive new envelopes', 'GROUP_REMOVAL_PENDING');
 
   const [groupMembers, knownUsers] = await Promise.all([
     prisma.groupMember.findMany({
@@ -166,17 +183,13 @@ adminRouter.post('/groups/:chatId/resolve-usernames', asyncHandler(async (req, r
 
   const unresolved = usernames.filter((username) => (matchesByUsername.get(username)?.length ?? 0) === 0);
   const ambiguous = usernames.filter((username) => (matchesByUsername.get(username)?.length ?? 0) > 1);
-  if (unresolved.length > 0 || ambiguous.length > 0) {
+  if (ambiguous.length > 0) {
     const formatUsernames = (values: string[]) => `${values.slice(0, 10).map((username) => `@${username}`).join(', ')}${values.length > 10 ? ` … and ${values.length - 10} more` : ''}`;
-    const reasons = [
-      unresolved.length ? `Could not resolve current group member username(s): ${formatUsernames(unresolved)}.` : '',
-      ambiguous.length ? `Username match is ambiguous: ${formatUsernames(ambiguous)}. Use numeric Telegram IDs instead.` : ''
-    ].filter(Boolean);
-    throw new AppError(400, `${reasons.join(' ')} Usernames can only be resolved from profiles already known to the bot or app. Ask the member to appear in a group update, or enter their numeric ID; the bot must be a group administrator to verify membership.`, 'TELEGRAM_USERNAME_UNRESOLVED');
+    throw new AppError(400, `Username match is ambiguous: ${formatUsernames(ambiguous)}. Use numeric Telegram IDs instead.`, 'TELEGRAM_USERNAME_AMBIGUOUS');
   }
 
-  const resolved = usernames.map((username) => matchesByUsername.get(username)![0]);
-  res.json({ resolved });
+  const resolved = usernames.flatMap((username) => matchesByUsername.get(username) ?? []);
+  res.json({ resolved, unresolved });
 }));
 
 adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
@@ -187,7 +200,12 @@ adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, Admi
     groupId: z.string().max(20).regex(/^-?\d+$/),
     expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440),
     audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
-    eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([])
+    eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([]),
+    eligibleUsernames: z.array(telegramUsernameSchema).max(500).default([])
+  }).superRefine((value, context) => {
+    if (value.eligibleTelegramIds.length + value.eligibleUsernames.length > 500) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['eligibleUsernames'], message: 'Select at most 500 recipients per envelope' });
+    }
   }).parse(req.body);
   if (!/^\d+$/.test(config.redEnvelope.treasuryTelegramId)) {
     throw new AppError(503, 'RED_ENVELOPE_TREASURY_TELEGRAM_ID is not configured', 'TREASURY_NOT_CONFIGURED');

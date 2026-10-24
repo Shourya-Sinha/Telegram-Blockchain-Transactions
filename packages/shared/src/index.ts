@@ -81,7 +81,11 @@ export const createEnvelopeSchema = z.object({
   groupId: z.string().max(20).regex(/^-?\d+$/),
   expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(24 * 60),
   audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
-  eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([])
+  eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([]),
+  eligibleUsernames: z.array(telegramUsernameSchema).max(500).default([])
+}).refine((value) => value.eligibleTelegramIds.length + value.eligibleUsernames.length <= 500, {
+  message: 'Select at most 500 recipients per envelope',
+  path: ['eligibleUsernames']
 });
 
 export const apiErrorSchema = z.object({ error: z.string(), code: z.string().optional() });

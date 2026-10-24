@@ -41,8 +41,8 @@ export async function telegramAuth(req: Request, _res: Response, next: NextFunct
     const identity = validateTelegramInitData(initData);
     const user = await prisma.user.upsert({
       where: { telegramId: identity.telegramId },
-      update: { username: identity.username, firstName: identity.firstName },
-      create: { telegramId: identity.telegramId, username: identity.username, firstName: identity.firstName, wallet: { create: {} } }
+      update: { username: identity.username ?? null, firstName: identity.firstName },
+      create: { telegramId: identity.telegramId, username: identity.username ?? null, firstName: identity.firstName, wallet: { create: {} } }
     });
     if (user.status === 'BANNED') throw new AppError(403, 'This Telegram account is banned', 'BANNED');
     req.telegramUser = { id: user.id, telegramId: user.telegramId, username: user.username ?? undefined, firstName: user.firstName, locale: user.locale, createdAt: user.createdAt, isAdmin: user.isAdmin, status: user.status };

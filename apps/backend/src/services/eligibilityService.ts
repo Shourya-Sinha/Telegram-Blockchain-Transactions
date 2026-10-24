@@ -2,21 +2,19 @@ import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { AppError } from '../utils/errors';
 import { isEnvelopeAudienceAllowed } from '../utils/envelopeAudience';
+import { isEnvelopeRecipientSelected } from './envelopeRecipientService';
 
 /** Protect private-audience envelope previews as well as claim attempts. */
 export async function assertEnvelopeAudience(userId: string, envelopeId: string, allowSenderView = false): Promise<void> {
   const [envelope, user] = await Promise.all([
     prisma.redEnvelope.findUnique({ where: { id: envelopeId }, select: { senderId: true, audience: true } }),
-    prisma.user.findUnique({ where: { id: userId }, select: { telegramId: true } })
+    prisma.user.findUnique({ where: { id: userId }, select: { telegramId: true, username: true } })
   ]);
   if (!envelope) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
   if (!user) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
   const allowed = envelope.audience === 'SELECTED'
-    ? await prisma.redEnvelopeEligibleUser.findUnique({
-      where: { envelopeId_telegramId: { envelopeId, telegramId: user.telegramId } },
-      select: { telegramId: true }
-    })
-    : null;
+    ? await isEnvelopeRecipientSelected(prisma, envelopeId, user)
+    : false;
   if (!isEnvelopeAudienceAllowed({
     audience: envelope.audience,
     isSelected: Boolean(allowed),
@@ -31,17 +29,14 @@ export async function assertClaimEligibility(userId: string, groupId: bigint, en
   if ((await redis.get('emergency:envelopes-disabled')) === '1') throw new AppError(503, 'Red envelope claims are temporarily disabled', 'ENVELOPES_DISABLED');
   const setting = await prisma.groupSetting.findUnique({ where: { chatId: groupId } });
   if (setting && !setting.enabled) throw new AppError(403, 'Red envelopes are disabled in this group', 'GROUP_DISABLED');
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true, telegramId: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { createdAt: true, telegramId: true, username: true } });
   if (!user) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
   if (envelopeId) {
     const envelope = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, select: { audience: true } });
     if (!envelope) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
     const allowed = envelope.audience === 'SELECTED'
-      ? await prisma.redEnvelopeEligibleUser.findUnique({
-        where: { envelopeId_telegramId: { envelopeId, telegramId: user.telegramId } },
-        select: { telegramId: true }
-      })
-      : null;
+      ? await isEnvelopeRecipientSelected(prisma, envelopeId, user)
+      : false;
     if (!isEnvelopeAudienceAllowed({ audience: envelope.audience, isSelected: Boolean(allowed) })) {
       throw new AppError(403, 'This red envelope is limited to selected group members', 'ENVELOPE_NOT_ELIGIBLE');
     }
