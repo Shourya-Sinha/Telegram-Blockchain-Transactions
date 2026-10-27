@@ -1,6 +1,10 @@
 /// <reference types="vite/client" />
 
 declare global {
+  interface ImportMetaEnv {
+    readonly VITE_API_BASE_URL?: string;
+  }
+
   /** Build stamp injected by vite.config.ts; rendered in the corner indicator. */
   const __APP_BUILD__: string;
 

@@ -69,7 +69,7 @@ Requirements: Node.js 20+, Docker (recommended), and npm 10+.
 
    Or use `npm run dev` to run all three with `concurrently`.
 
-The Vite applications proxy `/api` to `http://localhost:4000`. Open the frontend inside Telegram for signed `initData`; a normal browser still renders a safe preview state, but wallet mutations correctly require Telegram authentication.
+The Vite applications proxy `/api` to `http://localhost:4000` during development. The Mini App uses same-origin `/api` by default; if the frontend and backend are hosted on different origins, set `VITE_API_BASE_URL` to the backend origin (no trailing slash and no `/api` suffix) before building. For local Vite use, copy `apps/frontend/.env.example` to `apps/frontend/.env.local`; for Docker Compose builds, set `VITE_API_BASE_URL` in the root `.env` so Compose passes it to the frontend image. In production, `CORS_ORIGINS` must include the frontend's origin, not just the backend URL. Open the frontend inside Telegram for signed `initData`; a normal browser still renders a safe preview state, but wallet mutations correctly require Telegram authentication.
 
 ## Telegram setup
 
