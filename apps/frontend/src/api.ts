@@ -1,5 +1,14 @@
 import { telegramInitData } from './telegram';
 
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
+
+/** Use a configured backend origin for split deployments; otherwise stay same-origin. */
+export function resolveApiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return configuredApiBaseUrl ? `${configuredApiBaseUrl}${normalizedPath}` : normalizedPath;
+}
+
 /** Error thrown for non-2xx API responses, carrying the backend error code. */
 export class ApiError extends Error {
   constructor(message: string, public readonly code?: string) { super(message); }
@@ -21,7 +30,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     // the browser revalidates (the `304 … /api/envelopes/<id>` lines in the
     // server log), balances render stale, and WebViews that hand the bare 304
     // to fetch() made a perfectly good envelope look unavailable.
-    response = await fetch(path, { cache: 'no-store', ...options, headers });
+    response = await fetch(resolveApiUrl(path), { cache: 'no-store', ...options, headers });
   } catch {
     throw new ApiError('Network unavailable. Check your connection and try again.', 'NETWORK_ERROR');
   }
