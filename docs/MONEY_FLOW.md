@@ -87,7 +87,7 @@ If Telegram **refuses** to post (bot removed, no send permission, group deleted)
 
 ## 4. "Should the admin create it, or any person?" — both, and both really pay
 
-There are **two entry points**, and they differ *only* in whose wallet is charged.
+There are **two entry points**. The wallet charged differs, and their audiences are intentionally different: admin-originated envelopes must name selected recipients, while regular-user envelopes are available to group members.
 
 ### Path A — a normal user creates one
 
@@ -170,15 +170,33 @@ amount  = uniform_random(1 .. maximum)
 - the `remaining − (slots − 1)` term guarantees every later claimer still gets **at least 1 minor unit** — nobody can ever open an empty envelope;
 - the last remaining slot takes the whole remainder, so the split is exact.
 
+### Mine / sweep side settlement
+
+Mine mode is a test/review feature with an explicit payout interpretation: for every matched claim, the claimant pays the sender the envelope's full total `X`; the sender receives `X × matches`. Each result is computed from the last digit of the **displayed cents** (for example, `1.26` matches target `6`), so mine portions and totals are cent-exact.
+
+For each claim, the same Postgres transaction:
+
+1. Allocates one random whole-cent portion and determines whether its displayed final cent digit matches the target.
+2. Reserves `X` from the claimant's available balance as a `GAME_STAKE / DEBIT` ledger entry before returning the result. The claimant must have `X` available.
+3. Credits the portion as the normal `CLAIM` entry.
+4. On a miss, releases the `X` reserve as a `REFUND / CREDIT`; the claimant keeps the portion and makes no additional payment.
+5. On a hit, settles the `X` reserve and credits the sender `GAME_PAYOUT / CREDIT` for `X`.
+
+Claimant and sender wallet rows are locked in stable sorted order to avoid cross-claim deadlocks. The unique `(envelopeId, userId)` constraint still limits a Telegram user to one claim per envelope. All of these are internal USDT ledger movements, not TRC20 transactions. Admin-created envelopes must use a selected-recipient audience; regular-user envelopes are group-member envelopes.
+
+The reserve/payment interpretation is implemented for boss review and must not be treated as legal approval for real-money use. `MINE_GAME_REAL_FUNDS_ENABLED` defaults to `false`; keep real-funds mine play disabled until the required legal, compliance, custody, and operational reviews are signed off.
+
 ### Conservation
 
-For every envelope:
+For every standard envelope:
 
 ```
 totalMinor  ==  Σ (all claim amounts)  +  refund to sender
 ```
 
 Nothing is created, nothing is lost, and every line of that equation exists as a `LedgerEntry`.
+
+For a mine envelope, the same escrow equation holds for the packet itself. The separate match payment is a transfer of `X` from claimant to sender, represented by the claimant's `GAME_STAKE / DEBIT` and sender's `GAME_PAYOUT / CREDIT`; it does not mint USDT or change the system's total user liability. A miss pairs the reserve debit with a `REFUND / CREDIT` instead.
 
 ---
 

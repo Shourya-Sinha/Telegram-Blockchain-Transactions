@@ -25,6 +25,10 @@ export function minorToNumberString(minor: bigint): string { return formatMinor(
 export const envelopeModeSchema = z.enum(['RANDOM', 'EQUAL']);
 export type EnvelopeMode = z.infer<typeof envelopeModeSchema>;
 
+export const envelopeGameTypeSchema = z.enum(['STANDARD', 'MINE']);
+export type EnvelopeGameType = z.infer<typeof envelopeGameTypeSchema>;
+
+
 /** Base58 TRON address shape (TRC20 USDT destination). */
 export const TRON_ADDRESS_REGEX = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 
@@ -78,14 +82,37 @@ export const createEnvelopeSchema = z.object({
   total: z.string().regex(/^\d+(\.\d{1,6})?$/),
   count: z.number().int().min(1).max(500),
   mode: envelopeModeSchema.default('RANDOM'),
+  gameType: envelopeGameTypeSchema.default('STANDARD'),
+  mineDigit: z.number().int().min(0).max(9).optional(),
   groupId: z.string().max(20).regex(/^-?\d+$/),
   expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(24 * 60),
   audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
   eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([]),
   eligibleUsernames: z.array(telegramUsernameSchema).max(500).default([])
-}).refine((value) => value.eligibleTelegramIds.length + value.eligibleUsernames.length <= 500, {
-  message: 'Select at most 500 recipients per envelope',
-  path: ['eligibleUsernames']
+}).superRefine((value, context) => {
+  if (value.eligibleTelegramIds.length + value.eligibleUsernames.length > 500) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['eligibleUsernames'], message: 'Select at most 500 recipients per envelope' });
+  }
+  if (value.gameType === 'MINE') {
+    if (![5, 6, 9].includes(value.count)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['count'], message: 'Mine games require 5, 6, or 9 portions' });
+    }
+    if (value.mode !== 'RANDOM') {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['mode'], message: 'Mine games use random portions' });
+    }
+    if (value.mineDigit === undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['mineDigit'], message: 'Choose a mine digit from 0 to 9' });
+    }
+    const fraction = value.total.split('.')[1] ?? '';
+    const validAmount = /^\d+(\.\d{1,6})?$/.test(value.total);
+    if (fraction.length > 2) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['total'], message: 'Mine-game totals must use no more than two decimal places' });
+    } else if (validAmount && value.count > 0 && parseUsdtToMinor(value.total) < BigInt(value.count) * 10_000n) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['total'], message: 'Mine-game total must provide at least 0.01 USDT per portion' });
+    }
+  } else if (value.mineDigit !== undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['mineDigit'], message: 'A mine digit is only valid for mine games' });
+  }
 });
 
 export const apiErrorSchema = z.object({ error: z.string(), code: z.string().optional() });

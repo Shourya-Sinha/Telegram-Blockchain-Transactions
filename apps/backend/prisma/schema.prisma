@@ -19,6 +19,8 @@ enum LedgerType {
   FEE
   REFUND
   TRANSFER
+  GAME_STAKE
+  GAME_PAYOUT
 }
 
 enum LedgerDirection {
@@ -29,6 +31,11 @@ enum LedgerDirection {
 enum EnvelopeMode {
   RANDOM
   EQUAL
+}
+
+enum EnvelopeGameType {
+  STANDARD
+  MINE
 }
 
 enum EnvelopeStatus {
@@ -124,6 +131,8 @@ model RedEnvelope {
   totalSlots     Int
   remainingSlots Int
   mode           EnvelopeMode
+  gameType       EnvelopeGameType @default(STANDARD)
+  mineDigit      Int?
   status         EnvelopeStatus   @default(ACTIVE)
   audience       EnvelopeAudience @default(ALL)
   expiresAt      DateTime
@@ -141,6 +150,9 @@ model RedEnvelopeClaim {
   envelopeId String       @db.Uuid
   userId     String       @db.Uuid
   amountMinor BigInt
+  lastDigit   Int?
+  mineHit     Boolean?
+  payoutMinor BigInt       @default(0)
   claimedAt  DateTime     @default(now())
   envelope   RedEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
   user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -191,6 +203,16 @@ model AdminUser {
   role       AdminRole @default(SUPPORT)
   mfaSecret  String?
   createdAt  DateTime  @default(now())
+}
+
+model AdminDeveloperMessage {
+  id           String   @id @default(uuid()) @db.Uuid
+  adminId      String   @db.Uuid
+  adminUsername String
+  message      String   @db.Text
+  createdAt    DateTime @default(now())
+  @@index([createdAt])
+  @@index([adminId, createdAt])
 }
 
 model AuditLog {

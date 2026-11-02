@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { EnvelopeAudience, EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
-import { createEnvelopeSchema, parseUsdtToMinor } from '@red-envelope/shared';
+import { EnvelopeAudience, EnvelopeGameType, EnvelopeMode, EnvelopeStatus, LedgerType } from '../utils/prismaEnums';
+import { createEnvelopeSchema, formatMinor, parseUsdtToMinor } from '@red-envelope/shared';
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
+import { config } from '../config';
 import { AppError, isPrismaUniqueError } from '../utils/errors';
 import { assertClaimEligibility } from './eligibilityService';
-import { creditWallet, debitWallet, type Transaction, writeAudit } from './ledgerService';
+import { creditWallet, debitWallet, lockWalletAccounts, releaseReservedWallet, reserveWallet, settleReservedWallet, type Transaction, writeAudit } from './ledgerService';
 import { randomClaimAmount } from '../utils/envelopeAllocation';
+import { isMineGamePortionCount, lastDisplayedCentDigit, mineHit, randomMinePortion } from '../utils/mineGame';
 import { isEligibleUsernameRecipient, isEnvelopeAudienceAllowed, normalizeEligibleTelegramIds, normalizeEligibleTelegramUsernames, normalizeTelegramUsername } from '../utils/envelopeAudience';
 import { assertTelegramGroupMembership } from './telegramService';
 import { processPendingGroupRemovals } from './groupService';
@@ -15,6 +17,8 @@ export type CreateEnvelopeInput = {
   total: string;
   count: number;
   mode: 'RANDOM' | 'EQUAL';
+  gameType?: 'STANDARD' | 'MINE';
+  mineDigit?: number;
   groupId: string;
   expiresInMinutes: number;
   audience?: 'ALL' | 'SELECTED';
@@ -65,6 +69,15 @@ async function assertSelectedTelegramMembers(groupId: bigint, telegramIds: strin
 
 export async function createEnvelope(senderId: string, input: CreateEnvelopeInput) {
   const parsed = createEnvelopeSchema.parse(input);
+  if (input.actorId && parsed.audience !== 'SELECTED') {
+    throw new AppError(400, 'Admin-originated envelopes must be limited to selected Telegram users', 'ADMIN_ENVELOPE_REQUIRES_SELECTED_AUDIENCE');
+  }
+  if (parsed.gameType === 'MINE' && config.fundsMode === 'real' && !config.mineGameRealFundsEnabled) {
+    throw new AppError(403, 'Mine-game envelopes are disabled for real funds until legal and compliance review is complete', 'MINE_GAME_REAL_FUNDS_DISABLED');
+  }
+  if (parsed.gameType === 'MINE' && (!isMineGamePortionCount(parsed.count) || parsed.mineDigit === undefined)) {
+    throw new AppError(400, 'Mine games require 5, 6, or 9 portions and a target digit from 0 to 9', 'MINE_GAME_CONFIGURATION_INVALID');
+  }
   if ((await redis.get('emergency:envelopes-disabled')) === '1') throw new AppError(503, 'Red envelope creation is temporarily disabled', 'ENVELOPES_DISABLED');
   const totalMinor = parseUsdtToMinor(parsed.total);
   const groupId = BigInt(parsed.groupId);
@@ -98,6 +111,8 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
         totalSlots: parsed.count,
         remainingSlots: parsed.count,
         mode: parsed.mode as EnvelopeMode,
+        gameType: parsed.gameType as EnvelopeGameType,
+        mineDigit: parsed.gameType === 'MINE' ? parsed.mineDigit! : null,
         audience: parsed.audience as EnvelopeAudience,
         expiresAt: new Date(Date.now() + parsed.expiresInMinutes * 60_000),
         status: EnvelopeStatus.ACTIVE
@@ -113,7 +128,7 @@ export async function createEnvelope(senderId: string, input: CreateEnvelopeInpu
         });
       }
       const debit = await debitWallet(tx, senderId, totalMinor, LedgerType.TRANSFER, 'RED_ENVELOPE', envelope.id);
-      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, groupId: parsed.groupId, audience: parsed.audience, eligibleCount: eligibleTelegramIds.length + eligibleUsernames.length, usernameRecipientCount: eligibleUsernames.length } });
+      await writeAudit(tx, { actorId: input.actorId, action: 'RED_ENVELOPE_CREATED', entityType: 'RedEnvelope', entityId: envelope.id, ipAddress: input.ipAddress, after: { totalMinor: totalMinor.toString(), slots: parsed.count, mode: parsed.mode, gameType: parsed.gameType, mineDigit: parsed.mineDigit ?? null, minePayoutRule: parsed.gameType === 'MINE' ? 'each matching claimant pays sender the envelope total' : null, groupId: parsed.groupId, audience: parsed.audience, eligibleCount: eligibleTelegramIds.length + eligibleUsernames.length, usernameRecipientCount: eligibleUsernames.length } });
       return { envelope, availableMinor: debit.availableMinor };
     }, { isolationLevel: 'ReadCommitted' });
   } catch (error) {
@@ -190,7 +205,7 @@ async function matchSelectedRecipient(tx: Transaction, envelopeId: string, claim
 }
 
 export async function claimEnvelope(userId: string, envelopeId: string, ipAddress?: string) {
-  const initial = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, select: { groupId: true } });
+  const initial = await prisma.redEnvelope.findUnique({ where: { id: envelopeId }, select: { groupId: true, gameType: true, totalMinor: true } });
   if (!initial) throw new AppError(404, 'Red envelope not found', 'ENVELOPE_NOT_FOUND');
   await assertClaimEligibility(userId, initial.groupId, envelopeId);
 
@@ -206,6 +221,9 @@ export async function claimEnvelope(userId: string, envelopeId: string, ipAddres
         : { allowed: true as const };
       if (!isEnvelopeAudienceAllowed({ audience: envelope.audience, isSelected: recipientMatch.allowed })) {
         throw new AppError(403, 'This red envelope is limited to selected group members', 'ENVELOPE_NOT_ELIGIBLE');
+      }
+      if (envelope.gameType === EnvelopeGameType.MINE && envelope.senderId === userId) {
+        throw new AppError(403, 'You cannot claim your own mine-game envelope', 'MINE_SENDER_CANNOT_CLAIM');
       }
       if (envelope.status !== EnvelopeStatus.ACTIVE || envelope.remainingSlots <= 0 || envelope.remainingMinor <= 0n) {
         return { kind: 'closed' as const };
@@ -243,20 +261,87 @@ export async function claimEnvelope(userId: string, envelopeId: string, ipAddres
           });
         }
       }
-      const amountMinor = envelope.mode === EnvelopeMode.EQUAL
-        ? (envelope.remainingSlots === 1 ? envelope.remainingMinor : envelope.remainingMinor / BigInt(envelope.remainingSlots) + (envelope.remainingMinor % BigInt(envelope.remainingSlots) > 0n ? 1n : 0n))
-        : randomClaimAmount(envelope.remainingMinor, envelope.remainingSlots);
+      const isMineGame = envelope.gameType === EnvelopeGameType.MINE;
+      const amountMinor = isMineGame
+        ? randomMinePortion(envelope.remainingMinor, envelope.remainingSlots)
+        : envelope.mode === EnvelopeMode.EQUAL
+          ? (envelope.remainingSlots === 1 ? envelope.remainingMinor : envelope.remainingMinor / BigInt(envelope.remainingSlots) + (envelope.remainingMinor % BigInt(envelope.remainingSlots) > 0n ? 1n : 0n))
+          : randomClaimAmount(envelope.remainingMinor, envelope.remainingSlots);
+      const lastDigit = isMineGame ? lastDisplayedCentDigit(amountMinor) : null;
+      const didHit = isMineGame
+        ? envelope.mineDigit !== null && mineHit(amountMinor, envelope.mineDigit)
+        : null;
+      const payoutMinor = didHit ? envelope.totalMinor : 0n;
+      const claimId = randomUUID();
+
+      // Lock X from the claimant's available balance in the same transaction
+      // before any result is returned. A miss releases it; a hit settles it to
+      // the sender. This guarantees there is no unpaid or negative-balance hit.
+      if (isMineGame) {
+        if (envelope.mineDigit === null) throw new AppError(500, 'Mine-game target digit is missing', 'MINE_GAME_CONFIGURATION_INVALID');
+        // Consistent lock ordering prevents deadlocks when two game claims
+        // settle against each other's sender/claimant wallets concurrently.
+        await lockWalletAccounts(tx, [userId, envelope.senderId]);
+        await reserveWallet(tx, userId, envelope.totalMinor, LedgerType.GAME_STAKE, 'MINE_GAME_CLAIM', claimId);
+      }
+
       const nextRemainingSlots = envelope.remainingSlots - 1;
       const nextRemainingMinor = envelope.remainingMinor - amountMinor;
-      const claim = await tx.redEnvelopeClaim.create({ data: { envelopeId, userId, amountMinor } });
+      const claim = await tx.redEnvelopeClaim.create({ data: {
+        id: claimId,
+        envelopeId,
+        userId,
+        amountMinor,
+        lastDigit,
+        mineHit: didHit,
+        payoutMinor
+      } });
       await tx.redEnvelope.update({ where: { id: envelope.id }, data: {
         remainingMinor: nextRemainingMinor,
         remainingSlots: nextRemainingSlots,
         status: nextRemainingSlots === 0 ? EnvelopeStatus.COMPLETED : EnvelopeStatus.ACTIVE
       } });
       const credit = await creditWallet(tx, userId, amountMinor, LedgerType.CLAIM, 'RED_ENVELOPE', envelope.id);
-      await writeAudit(tx, { action: 'RED_ENVELOPE_CLAIMED', entityType: 'RedEnvelopeClaim', entityId: claim.id, ipAddress, after: { envelopeId, userId, amountMinor: amountMinor.toString() } });
-      return { kind: 'claimed' as const, claim, availableMinor: credit.availableMinor };
+      let availableMinor = credit.availableMinor;
+      if (isMineGame && didHit) {
+        await settleReservedWallet(tx, userId, envelope.totalMinor);
+        await creditWallet(tx, envelope.senderId, envelope.totalMinor, LedgerType.GAME_PAYOUT, 'MINE_GAME_CLAIM', claim.id);
+      } else if (isMineGame) {
+        const release = await releaseReservedWallet(tx, userId, envelope.totalMinor, LedgerType.REFUND, 'MINE_GAME_CLAIM', claim.id);
+        availableMinor = release.availableMinor;
+      }
+      await writeAudit(tx, {
+        action: 'RED_ENVELOPE_CLAIMED',
+        entityType: 'RedEnvelopeClaim',
+        entityId: claim.id,
+        ipAddress,
+        after: {
+          envelopeId,
+          userId,
+          amountMinor: amountMinor.toString(),
+          gameType: envelope.gameType,
+          targetDigit: envelope.mineDigit,
+          lastDigit,
+          mineHit: didHit,
+          payoutMinor: payoutMinor.toString(),
+          reservedMinor: isMineGame ? envelope.totalMinor.toString() : '0'
+        }
+      });
+      return {
+        kind: 'claimed' as const,
+        claim,
+        availableMinor,
+        ...(isMineGame ? {
+          gameResult: {
+            gameType: 'MINE' as const,
+            targetDigit: envelope.mineDigit!,
+            lastDigit: lastDigit!,
+            hit: didHit!,
+            payoutMinor,
+            reservedMinor: envelope.totalMinor
+          }
+        } : {})
+      };
     }, { isolationLevel: 'ReadCommitted' });
 
     if (result.kind === 'closed') throw new AppError(409, 'This red envelope has already been claimed', 'ENVELOPE_CLOSED');
@@ -265,6 +350,9 @@ export async function claimEnvelope(userId: string, envelopeId: string, ipAddres
     return result;
   } catch (error) {
     if (isPrismaUniqueError(error)) throw new AppError(409, 'You have already claimed this red envelope', 'ALREADY_CLAIMED');
+    if (initial.gameType === EnvelopeGameType.MINE && error instanceof AppError && error.code === 'INSUFFICIENT_BALANCE') {
+      throw new AppError(400, `A mine-game claim requires ${formatMinor(initial.totalMinor)} USDT of available balance. That amount is reserved before the result is revealed; deposit or wait until funds are released, then try again.`, 'GAME_COLLATERAL_REQUIRED');
+    }
     throw error;
   }
 }

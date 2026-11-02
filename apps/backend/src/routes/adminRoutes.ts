@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { AdminRole, DepositStatus, LedgerType, WithdrawalStatus } from '../utils/prismaEnums';
+import { AdminRole, DepositStatus, LedgerDirection, LedgerType, WithdrawalStatus } from '../utils/prismaEnums';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { adminAuth, requireAdminRole } from '../middleware/adminAuth';
@@ -53,11 +53,80 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   const recent = await prisma.redEnvelope.findMany({
     include: {
       sender: { select: { telegramId: true, firstName: true, username: true } },
+      claims: {
+        where: { mineHit: { not: null } },
+        orderBy: { claimedAt: 'asc' },
+        select: {
+          id: true, amountMinor: true, lastDigit: true, mineHit: true, payoutMinor: true, claimedAt: true,
+          user: { select: { telegramId: true, firstName: true, username: true } }
+        }
+      },
       _count: { select: { claims: true, eligibleUsers: true, eligibleUsernames: true } }
     },
     orderBy: { createdAt: 'desc' },
     take: 25
   });
+  let mineReport = {
+    grossPayoutMinor: 0n,
+    hitCount: 0,
+    settledFundedMinor: 0n,
+    settledRefundedMinor: 0n,
+    settledPayoutMinor: 0n,
+    netRealizedMinor: 0n,
+    activeOutstandingMinor: 0n
+  };
+  if (treasury?.id) {
+    const gamePayoutWhere = { userId: treasury.id, type: LedgerType.GAME_PAYOUT, direction: LedgerDirection.CREDIT, referenceType: 'MINE_GAME_CLAIM' };
+    const [payoutAggregate, hitCount, lifecycleRows] = await Promise.all([
+      prisma.ledgerEntry.aggregate({ where: gamePayoutWhere, _sum: { amountMinor: true } }),
+      prisma.ledgerEntry.count({ where: gamePayoutWhere }),
+      prisma.$queryRawUnsafe(`
+        SELECT
+          (SELECT COALESCE(SUM(e."totalMinor"), 0)::bigint
+           FROM "RedEnvelope" e
+           WHERE e."senderId" = $1::uuid AND e."gameType" = 'MINE'
+             AND e."status" IN ('COMPLETED', 'EXPIRED', 'REFUNDED')) AS "settledFundedMinor",
+          (SELECT COALESCE(SUM(l."amountMinor"), 0)::bigint
+           FROM "LedgerEntry" l
+           JOIN "RedEnvelope" e ON l."referenceId" = e."id"::text
+           WHERE l."userId" = $1::uuid AND l."type" = 'REFUND' AND l."direction" = 'CREDIT'
+             AND l."referenceType" = 'RED_ENVELOPE'
+             AND e."senderId" = $1::uuid AND e."gameType" = 'MINE'
+             AND e."status" IN ('COMPLETED', 'EXPIRED', 'REFUNDED')) AS "settledRefundedMinor",
+          (SELECT COALESCE(SUM(l."amountMinor"), 0)::bigint
+           FROM "LedgerEntry" l
+           JOIN "RedEnvelopeClaim" c ON l."referenceId" = c."id"::text
+           JOIN "RedEnvelope" e ON c."envelopeId" = e."id"
+           WHERE l."userId" = $1::uuid AND l."type" = 'GAME_PAYOUT' AND l."direction" = 'CREDIT'
+             AND l."referenceType" = 'MINE_GAME_CLAIM'
+             AND e."senderId" = $1::uuid AND e."gameType" = 'MINE'
+             AND e."status" IN ('COMPLETED', 'EXPIRED', 'REFUNDED')) AS "settledPayoutMinor",
+          (SELECT COALESCE(SUM(e."remainingMinor"), 0)::bigint
+           FROM "RedEnvelope" e
+           WHERE e."senderId" = $1::uuid AND e."gameType" = 'MINE'
+             AND e."status" = 'ACTIVE') AS "activeOutstandingMinor"
+      `, treasury.id)
+    ]);
+    const lifecycle = (lifecycleRows as Array<{
+      settledFundedMinor: bigint;
+      settledRefundedMinor: bigint;
+      settledPayoutMinor: bigint;
+      activeOutstandingMinor: bigint;
+    }>)[0];
+    const grossPayoutMinor = payoutAggregate._sum.amountMinor ?? 0n;
+    const settledFundedMinor = lifecycle?.settledFundedMinor ?? 0n;
+    const settledRefundedMinor = lifecycle?.settledRefundedMinor ?? 0n;
+    const settledPayoutMinor = lifecycle?.settledPayoutMinor ?? 0n;
+    mineReport = {
+      grossPayoutMinor,
+      hitCount,
+      settledFundedMinor,
+      settledRefundedMinor,
+      settledPayoutMinor,
+      netRealizedMinor: settledPayoutMinor + settledRefundedMinor - settledFundedMinor,
+      activeOutstandingMinor: lifecycle?.activeOutstandingMinor ?? 0n
+    };
+  }
   res.json(jsonSafe({
     configured: Boolean(rawTreasuryId && treasury?.wallet && treasury.status === 'ACTIVE'),
     treasuryTelegramIdConfigured: /^\d+$/.test(rawTreasuryId),
@@ -69,9 +138,38 @@ adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
           ? 'The configured treasury user is banned. Restore access or configure a different treasury.'
           : undefined,
     treasury,
+    mineReport,
     groups,
     recent
   }));
+}));
+
+adminRouter.get('/developer-messages', asyncHandler(async (_req, res) => {
+  const messages = await prisma.adminDeveloperMessage.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: { id: true, adminUsername: true, message: true, createdAt: true }
+  });
+  res.json(jsonSafe({ messages }));
+}));
+
+adminRouter.post('/developer-messages', rateLimit('admin-developer-message', 10), asyncHandler(async (req, res) => {
+  const payload = z.object({ message: z.string().trim().min(1).max(5000) }).parse(req.body);
+  const saved = await prisma.$transaction(async (tx: any) => {
+    const row = await tx.adminDeveloperMessage.create({
+      data: { adminId: req.adminUser!.id, adminUsername: req.adminUser!.username, message: payload.message }
+    });
+    await writeAudit(tx, {
+      actorId: req.adminUser!.id,
+      action: 'ADMIN_DEVELOPER_MESSAGE_SAVED',
+      entityType: 'AdminDeveloperMessage',
+      entityId: row.id,
+      ipAddress: req.ip,
+      after: { adminUsername: req.adminUser!.username, messageLength: payload.message.length }
+    });
+    return row;
+  });
+  res.status(201).json(jsonSafe(saved));
 }));
 
 adminRouter.get('/groups', asyncHandler(async (req, res) => {
@@ -197,9 +295,11 @@ adminRouter.post('/envelopes/send', requireAdminRole(AdminRole.SUPER_ADMIN, Admi
     total: z.string().regex(/^\d+(\.\d{1,6})?$/),
     count: z.number().int().min(1).max(500),
     mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
+    gameType: z.enum(['STANDARD', 'MINE']).default('STANDARD'),
+    mineDigit: z.number().int().min(0).max(9).optional(),
     groupId: z.string().max(20).regex(/^-?\d+$/),
     expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440),
-    audience: z.enum(['ALL', 'SELECTED']).default('ALL'),
+    audience: z.enum(['ALL', 'SELECTED']).default('SELECTED'),
     eligibleTelegramIds: z.array(telegramUserIdSchema).max(500).default([]),
     eligibleUsernames: z.array(telegramUsernameSchema).max(500).default([])
   }).superRefine((value, context) => {
