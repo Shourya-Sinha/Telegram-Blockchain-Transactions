@@ -214,6 +214,8 @@ type PublishableEnvelope = {
   totalMinor: bigint;
   totalSlots: number;
   mode: string;
+  gameType?: string;
+  mineDigit?: number | null;
   audience?: string;
   expiresAt: Date;
   sender?: { firstName?: string | null } | null;
@@ -267,6 +269,7 @@ export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Pro
   const title = senderName
     ? `🧧 ${senderName}'s red envelope · ${senderName} 的红包`
     : '🧧 Red envelope · 红包';
+  const isMineGame = envelope.gameType === 'MINE';
   const message = await getTelegramBot().api.sendMessage(
     envelope.groupId.toString(),
     [
@@ -274,11 +277,17 @@ export async function publishEnvelopeMessage(envelope: PublishableEnvelope): Pro
       '恭喜发财，大吉大利 🎊',
       '',
       `Total · 总额: ${formatMinor(envelope.totalMinor)} USDT`,
-      `Claims · 份数: ${envelope.totalSlots} · ${mode}`,
+      `Claims · 份数: ${envelope.totalSlots} · ${isMineGame ? 'random cents · 随机分到分' : mode}`,
+      ...(isMineGame ? [
+        `Mine digit · 雷号: ${envelope.mineDigit} (last displayed cent digit · 金额显示的最后一位分)`,
+        `Payout · 结算: each hit pays the sender the full envelope total (${formatMinor(envelope.totalMinor)} USDT) · 每次命中向发送者支付红包总额`,
+        'The full payout is reserved from available balance before the result is revealed. · 揭晓结果前会先预留完整赔付额。'
+      ] : []),
       `Expires · 过期: ${envelope.expiresAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`,
+      ...(config.fundsMode === 'test' ? ['TEST MODE · 测试模式：不涉及真实 USDT。'] : []),
       '',
       envelope.audience === 'SELECTED'
-        ? 'Only selected group members can claim this envelope. · 仅被选中的群成员可领取。'
+        ? 'Only selected group members can claim this envelope. Each Telegram account can claim once. · 仅被选中的群成员可领取，每个账号限领一次。'
         : 'Tap below to open it. Each Telegram account can claim once. · 点击下方按钮领取，每个账号限领一次。'
     ].join('\n'),
     { reply_markup: keyboard }

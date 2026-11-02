@@ -11,7 +11,7 @@ A red envelope is a prepaid distribution of the app's **internal USDT balance**:
 1. A sender chooses a total amount, a number of claims, a Telegram group, and a distribution mode.
 2. The server immediately debits the entire total from the sender's internal wallet.
 3. The bot posts a message and **Claim red envelope** button in that group.
-4. The selected audience (or any verified group member, if chosen) can tap once.
+4. Each Telegram user can tap once. Admin-originated envelopes are limited to admin-selected recipients; envelopes created by regular users are available to group members.
 5. The server checks audience access and credits that member's internal wallet in one database transaction.
 6. When all claims are used, the envelope is complete. When it expires, every unclaimed minor unit is refunded to the sender.
 
@@ -21,6 +21,19 @@ Claims are off-chain ledger transfers. The app does **not** send a TRC20 transac
 
 - **RANDOM:** every claimant receives a cryptographically random share while at least one USDT minor unit remains reserved for each later claim.
 - **EQUAL:** the remaining amount is divided across the remaining claims as evenly as integer minor units permit.
+
+### Mine / sweep mode (testing and boss review)
+
+Mine envelopes are a separate mode alongside standard envelopes:
+
+- The sender selects a target digit from `0` to `9`, an expiry, and exactly `5`, `6`, or `9` portions.
+- The envelope total and each randomly allocated portion use whole cents. The target is compared with the final digit of the displayed cents: `1.26 USDT` ends in `6`. This keeps the rule aligned with what members see.
+- **Payout interpretation implemented for boss review:** for every matching claim, that claimant pays the sender `X`, where `X` is the envelope's full total. The sender receives `X × number of matching claims`. A no-match claim has no additional payment; the claimant keeps the original envelope share.
+- Before a mine result is returned, the backend reserves `X` from the claimant's **available** internal balance. The claimant needs at least `X` available. A miss releases the reserve; a hit settles it to the sender. Claims, reservations, releases, and payouts are internal ledger entries, not individual TRON transactions.
+- Each Telegram account may claim at most once per envelope. Unclaimed portions return to the sender at the sender-selected expiry.
+- Admin-created envelopes are limited to admin-selected recipients. Regular-user-created envelopes are open to group members.
+
+Real-funds mine games are disabled by default with `MINE_GAME_REAL_FUNDS_ENABLED=false`. Enabling a real-money mode requires legal, compliance, custody, and operational review; the test implementation is not a production approval.
 
 ## 2. The three different roles
 
@@ -77,7 +90,7 @@ For every destination group:
 3. The bot records the group title and numeric ID when Telegram sends the bot-added update. If it does not appear, run `/registergroup` in that group; the bot replies with the group title and ID.
 4. Open **Admin → Groups & members** to see the group card (name + ID) and the member profiles observed by the bot. **Send envelope** and **Group settings** also use the registered group list.
 
-The new `GroupMember` and envelope-audience tables are in the included Prisma migration. Apply it before using this feature (`npm run db:migrate` for a local database; Docker runs `prisma migrate deploy` at backend startup), then regenerate the client if your workflow does not do so automatically (`npm run db:generate`).
+The repository includes Prisma migrations for the group/member and envelope-audience tables, Mine/sweep fields and ledger types (`20261102120000_mine_sweep_game`), and the shared admin developer-request inbox (`20261102150000_admin_developer_messages`). Apply all pending migrations before using these features (`npm run db:migrate` for a local database; Docker runs `prisma migrate deploy` at backend startup), then regenerate the client if your workflow does not do so automatically (`npm run db:generate`).
 
 ### What the member directory can and cannot show
 
@@ -133,7 +146,10 @@ FUNDS_MODE=real
 DEPOSIT_MODE=unique
 ALLOW_DEV_CREDIT=false
 DEV_AUTO_CREDIT_USDT=0
+MINE_GAME_REAL_FUNDS_ENABLED=false
 ```
+
+Mine/sweep games remain disabled in real-funds mode unless `MINE_GAME_REAL_FUNDS_ENABLED=true` is deliberately set after legal, compliance, custody, and operational approval. Do not enable it merely to bypass the guard during testing.
 
 It also requires all production secrets and TRON wallet settings. Startup fails closed if real mode is incomplete, if test credit is enabled in production, or if deposits are not configured for unique addresses. `DEPOSIT_MODE=unique` uses each user's `User.depositAddress`; addresses must first be provisioned by reviewed self-custody/key-management infrastructure or a custody provider. The shared hot-wallet address is never returned as a production user deposit address.
 
@@ -147,9 +163,9 @@ Before real funds are accepted, implement unique deposit-address provisioning (o
 
 1. Sign in to the admin frontend with the seeded admin credentials.
 2. Open **Send envelope** and select the destination group by name (the group ID is shown too).
-3. Choose the claim audience. **Selected members only** is the safe default. Add recipients in any of three ways: select observed profiles, paste known Telegram user IDs, or enter known `@usernames`. Username resolution works only for profiles already known from group updates or active app accounts; Telegram's Bot API cannot look up arbitrary usernames, so use the numeric ID when the username is unknown. Before posting, the bot verifies every selected ID is currently in the chosen group; it checks membership again at claim time. Only selected Telegram IDs can open and claim the envelope. Alternatively choose **Any verified group member** for an unrestricted envelope.
-4. Enter total USDT, number of claims, random/equal mode, and expiry.
-5. Confirm that the treasury balance covers the total.
+3. Admin-originated envelopes are **always limited to selected recipients**; there is no unrestricted admin audience. Add recipients by selecting observed profiles, entering numeric Telegram IDs, or entering usernames. Username resolution works only for profiles already known from group updates or active app accounts; Telegram's Bot API cannot look up arbitrary usernames. An unknown username is bound on its first successful authenticated claim to that Telegram ID, then remains authorized by ID. Before posting, the bot verifies each numeric ID is currently in the group and checks membership again at claim time.
+4. Choose Standard or Mine / sweep. For Mine, choose a target digit `0–9`, exactly `5`, `6`, or `9` portions, and an expiry. The UI displays the implemented full-total-per-match payout rule and the required available-balance reserve for boss review. Standard envelopes retain random/equal allocation.
+5. Enter total USDT. Mine-game totals must use cents; confirm the treasury balance covers the envelope total.
 6. Click **Send to Telegram group**.
 
 The backend then:
@@ -182,10 +198,10 @@ This posts a random envelope totaling 10 USDT with five claims in the current gr
 1. Open the wallet inside Telegram.
 2. Open **DeFi**.
 3. Select a registered group.
-4. Choose amount, claim count, and random/equal mode.
+4. Choose Standard or Mine / sweep, the amount, count, and expiry. Mine mode requires a target digit and exactly 5, 6, or 9 random portions; the total must use cents.
 5. Tap **Post envelope to group**.
 
-The server verifies that the sender is a member of the chosen group before debiting the sender and publishing the message.
+The server verifies that the sender is a member of the chosen group before debiting the sender and publishing the message. Regular-user envelopes are open to group members; they do not require every member to have pre-registered.
 
 ## 8. What happens when a user claims
 
@@ -202,6 +218,8 @@ The server verifies that the sender is a member of the chosen group before debit
 6. The server checks that this user has not already claimed this envelope.
 7. One amount is calculated, a unique claim is created, and the user's wallet is credited in the same transaction.
 8. Telegram shows the claimed amount in an alert. The member can open the wallet or run `/balance` to see the new balance.
+
+For Mine / sweep, the transaction additionally reserves the full envelope total `X` from the claimant's available balance before returning a result. On a miss it credits the reserve back; on a hit it settles the reserve to the sender and records a `GAME_PAYOUT` credit of `X` to the sender. The sender therefore receives `X` for each matching claim. A claimant with less than `X` available gets a clear balance requirement and cannot open that mine envelope until they have enough. No match creates no extra payment, and the claimant still keeps the portion credited by the envelope.
 
 The database unique constraint on `(envelopeId, userId)` and the row lock are the final concurrency protections.
 
@@ -245,7 +263,7 @@ The selected sender/treasury does not have enough internal balance. Locked balan
 
 ### User cannot claim
 
-Check the alert shown by Telegram. Common causes are already claimed, envelope complete/expired, group disabled, account too new, too few messages, daily group limit reached, or global emergency disable.
+Check the alert shown by Telegram. Common causes are already claimed, envelope complete/expired, group disabled, account too new, too few messages, daily group limit reached, global emergency disable, or (for Mine / sweep) less than the full envelope total available for the required pre-reveal reserve.
 
 ### Message-count requirement never increases
 
@@ -291,6 +309,7 @@ Therefore the envelope ledger transaction is a sound **requirement-level foundat
 
 - Bot commands and callback: `apps/backend/src/bot/bot.ts`
 - Creation/claim/refund transaction: `apps/backend/src/services/envelopeService.ts`
+- Mine-game cent allocation and digit matching: `apps/backend/src/utils/mineGame.ts`
 - Telegram publication compensation: `apps/backend/src/services/envelopePublishingService.ts`
 - Group discovery: `apps/backend/src/services/groupService.ts`
 - Eligibility rules: `apps/backend/src/services/eligibilityService.ts`

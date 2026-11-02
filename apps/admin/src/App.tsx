@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { adminApi, type Dashboard, type Deposit, type EnvelopeSetup, type User, type Withdrawal } from './api';
+import { adminApi, type AdminDeveloperMessage, type Dashboard, type Deposit, type EnvelopeSetup, type User, type Withdrawal } from './api';
 import { useT, type Translate } from './i18n';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { GroupsPage } from './pages/GroupsPage';
 import { GroupMemberPicker } from './components/GroupMemberPicker';
 
 type Page = 'dashboard' | 'envelopes' | 'groups' | 'deposits' | 'withdrawals' | 'users' | 'settings' | 'audit';
-const money = (minor?: string | number) => { if (minor === undefined) return '0.00'; const n = BigInt(minor); return `${n / 1_000_000n}.${(n % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`; };
+const money = (minor?: string | number) => { if (minor === undefined) return '0.00'; const n = BigInt(minor); const abs = n < 0n ? -n : n; return `${n < 0n ? '-' : ''}${abs / 1_000_000n}.${(abs % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`; };
 const date = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 
 function statusLabel(t: Translate, status: string): string {
@@ -44,13 +44,22 @@ function EnvelopesPage() {
   const t = useT();
   const client = useQueryClient();
   const setup = useQuery({ queryKey: ['envelope-setup'], queryFn: () => adminApi<EnvelopeSetup>('/api/admin/envelopes/setup') });
+  const developerMessages = useQuery({ queryKey: ['developer-messages'], queryFn: () => adminApi<{ messages: AdminDeveloperMessage[] }>('/api/admin/developer-messages') });
   const testing = useQuery({ queryKey: ['testing'], queryFn: () => adminApi<{ fundsMode: 'test' | 'real'; testCreditEnabled: boolean }>('/api/admin/testing') });
   const [groupId, setGroupId] = useState('');
+  const [howToPlayOpen, setHowToPlayOpen] = useState(false);
+  const [selectedMineEnvelopeId, setSelectedMineEnvelopeId] = useState<string | null>(null);
+  const [developerMessage, setDeveloperMessage] = useState('');
+  const [developerPreviewOpen, setDeveloperPreviewOpen] = useState(false);
+  const [developerDraftSaved, setDeveloperDraftSaved] = useState(false);
+  const [developerDraftError, setDeveloperDraftError] = useState('');
+  const [developerMessageCopied, setDeveloperMessageCopied] = useState(false);
   const [total, setTotal] = useState('10');
   const [count, setCount] = useState(5);
   const [mode, setMode] = useState<'RANDOM' | 'EQUAL'>('RANDOM');
+  const [gameType, setGameType] = useState<'STANDARD' | 'MINE'>('STANDARD');
+  const [mineDigit, setMineDigit] = useState(0);
   const [expiresInMinutes, setExpiresInMinutes] = useState(1440);
-  const [audience, setAudience] = useState<'ALL' | 'SELECTED'>('SELECTED');
   const [eligibleTelegramIds, setEligibleTelegramIds] = useState<string[]>([]);
   const [eligibleTelegramUsernames, setEligibleTelegramUsernames] = useState<string[]>([]);
   const [message, setMessage] = useState('');
@@ -58,6 +67,22 @@ function EnvelopesPage() {
   const [treasuryAmount, setTreasuryAmount] = useState('1000');
   const [treasuryMessage, setTreasuryMessage] = useState('');
   const [treasuryTone, setTreasuryTone] = useState<'success' | 'danger'>('danger');
+  const saveDeveloperMessage = useMutation({
+    mutationFn: () => adminApi<AdminDeveloperMessage>('/api/admin/developer-messages', {
+      method: 'POST',
+      body: JSON.stringify({ message: developerMessage.trim() })
+    }),
+    onSuccess: () => {
+      setDeveloperDraftSaved(true);
+      setDeveloperDraftError('');
+      setDeveloperPreviewOpen(false);
+      void client.invalidateQueries({ queryKey: ['developer-messages'] });
+    },
+    onError: (error) => {
+      setDeveloperDraftSaved(false);
+      setDeveloperDraftError(error instanceof Error ? error.message : t('developerDraftSaveFailed'));
+    }
+  });
   // Top up the treasury wallet directly from the console — the same audited
   // ledger operation as `npm run db:dev-credit -- <treasury-id> <amount>`.
   const treasuryCredit = useMutation({
@@ -79,7 +104,7 @@ function EnvelopesPage() {
   const send = useMutation({
     mutationFn: () => adminApi<{ envelope: { id: string } }>('/api/admin/envelopes/send', {
       method: 'POST',
-      body: JSON.stringify({ groupId, total, count, mode, expiresInMinutes, audience, eligibleTelegramIds: audience === 'SELECTED' ? eligibleTelegramIds : [], eligibleUsernames: audience === 'SELECTED' ? eligibleTelegramUsernames : [] })
+      body: JSON.stringify({ groupId, total, count, mode: gameType === 'MINE' ? 'RANDOM' : mode, gameType, ...(gameType === 'MINE' ? { mineDigit } : {}), expiresInMinutes, audience: 'SELECTED', eligibleTelegramIds, eligibleUsernames: eligibleTelegramUsernames })
     }),
     onSuccess: (result) => {
       setMessage(t('envelopePosted', result.envelope.id.slice(0, 8)));
@@ -89,14 +114,47 @@ function EnvelopesPage() {
     onError: (error) => {
       const detail = error instanceof Error ? error.message : t('unableToSendEnvelope');
       const code = (error as { code?: string }).code;
-      setMessage(code === 'TREASURY_INSUFFICIENT_BALANCE' ? `${t('treasuryInsufficient')} ${detail}` : detail);
+      setMessage(code === 'TREASURY_INSUFFICIENT_BALANCE' ? `${t('treasuryInsufficient')} ${detail}` : code === 'MINE_GAME_REAL_FUNDS_DISABLED' ? t('mineGameLiveDisabled') : detail);
       setMessageTone('danger');
     }
   });
   const groups = setup.data?.groups.filter((group) => group.enabled) ?? [];
   const groupName = (id: string) => setup.data?.groups.find((group) => group.chatId === id)?.title ?? id;
-  const audienceReady = audience === 'ALL' || eligibleTelegramIds.length + eligibleTelegramUsernames.length > 0;
-  return <PageFrame title={t('sendEnvelopeTitle')} subtitle={t('sendEnvelopeSubtitle')}>
+  const mineEnvelopes = setup.data?.recent.filter((envelope) => envelope.gameType === 'MINE') ?? [];
+  const selectedMineEnvelope = mineEnvelopes.find((envelope) => envelope.id === selectedMineEnvelopeId);
+  const envelopeMineHits = (envelope: EnvelopeSetup['recent'][number]) => envelope.claims.filter((claim) => claim.mineHit === true).length;
+  const envelopeMinePayout = (envelope: EnvelopeSetup['recent'][number]) => envelope.claims.reduce((sum, claim) => sum + BigInt(claim.payoutMinor || '0'), 0n).toString();
+  const audienceReady = eligibleTelegramIds.length + eligibleTelegramUsernames.length > 0;
+  const saveDeveloperDraft = () => {
+    if (!developerMessage.trim()) { setDeveloperDraftError(t('developerDraftRequired')); return; }
+    saveDeveloperMessage.mutate();
+  };
+  const previewDeveloperDraft = () => {
+    if (!developerMessage.trim()) { setDeveloperDraftError(t('developerDraftRequired')); return; }
+    setDeveloperPreviewOpen(true);
+  };
+  const copyDeveloperDraft = async () => {
+    try {
+      await navigator.clipboard.writeText(developerMessage);
+      setDeveloperMessageCopied(true);
+      setDeveloperDraftError('');
+    } catch {
+      setDeveloperMessageCopied(false);
+      setDeveloperDraftError(t('developerMessageCopyError'));
+    }
+  };
+  return <PageFrame title={t('sendEnvelopeTitle')} subtitle={t('sendEnvelopeSubtitle')} action={<button type="button" className="refresh-button" aria-expanded={howToPlayOpen} onClick={() => setHowToPlayOpen((open) => !open)}>{howToPlayOpen ? t('hideHowToPlay') : t('showHowToPlay')}</button>}>
+    {howToPlayOpen && <section className="panel mine-guide-panel" aria-labelledby="mine-guide-heading">
+      <div className="panel-head"><div><h2 id="mine-guide-heading">{t('mineGuideTitle')}</h2><p>{t('mineGuideNetwork')}</p></div><span className="mine-guide-badge">{t('reviewRequiredBadge')}</span></div>
+      <div className="mine-guide-grid">
+        <article><strong>{t('mineGuideStandardTitle')}</strong><p>{t('mineGuideStandardText')}</p></article>
+        <article><strong>{t('mineGuideSetupTitle')}</strong><p>{t('mineGuideSetupText')}</p></article>
+        <article className="emphasis"><strong>{t('mineGuideSettlementTitle')}</strong><p>{t('mineGuideSettlementText')}</p></article>
+        <article><strong>{t('mineGuideExpiryTitle')}</strong><p>{t('mineGuideExpiryText')}</p></article>
+      </div>
+      <div className="mine-guide-investor"><strong>{t('mineGuideInvestorTitle')}</strong><p>{t('mineGuideInvestorText')}</p></div>
+      <div className="mine-guide-compliance">{t('mineGuideCompliance')}</div>
+    </section>}
     {setup.isError && <div className="alert danger">{(setup.error as Error).message}</div>}
     {setup.data && !setup.data.configured && <div className="alert danger">{setup.data.configurationMessage}</div>}
     <div className="envelope-admin-grid">
@@ -104,12 +162,18 @@ function EnvelopesPage() {
         <div className="panel-head"><div><h2>{t('newGroupEnvelope')}</h2><p>{t('newGroupEnvelopeNote')}</p></div><span className="settings-icon">🧧</span></div>
         <label>{t('destinationGroup')}<select value={groupId} onChange={(event) => { setGroupId(event.target.value); setEligibleTelegramIds([]); setEligibleTelegramUsernames([]); }}><option value="">{t('selectRegisteredGroup')}</option>{groups.map((group) => <option key={group.id} value={group.chatId}>{group.title ?? group.username ?? group.chatId} ({group.chatId}) · {group._count?.members ?? 0} {t('knownMembers')}</option>)}</select></label>
         {!groups.length && <div className="info-callout"><strong>{t('noRegisteredGroups')}</strong><p>{t('noRegisteredGroupsHint')}</p></div>}
-        <div className="settings-grid"><label>{t('totalUsdt')}<input value={total} inputMode="decimal" onChange={(event) => setTotal(event.target.value)} /></label><label>{t('numberOfClaims')}<input type="number" min="1" max="500" value={count} onChange={(event) => setCount(Number(event.target.value))} /></label><label>{t('distribution')}<select value={mode} onChange={(event) => setMode(event.target.value as 'RANDOM' | 'EQUAL')}><option value="RANDOM">{t('randomShares')}</option><option value="EQUAL">{t('equalShares')}</option></select></label></div>
+        <label>{t('envelopeType')}<select value={gameType} onChange={(event) => { const next = event.target.value as 'STANDARD' | 'MINE'; setGameType(next); if (next === 'MINE') { if (![5, 6, 9].includes(count)) setCount(5); setMode('RANDOM'); } }}><option value="STANDARD">{t('standardMode')}</option><option value="MINE">{t('mineMode')}</option></select></label>
+        <div className="settings-grid">
+          <label>{t('totalUsdt')}<input type="number" min={gameType === 'MINE' ? '0.01' : '0.000001'} step={gameType === 'MINE' ? '0.01' : '0.000001'} value={total} inputMode="decimal" onChange={(event) => setTotal(event.target.value)} /></label>
+          <label>{t('numberOfClaims')}{gameType === 'MINE' ? <select value={count} onChange={(event) => setCount(Number(event.target.value))}>{[5, 6, 9].map((slots) => <option key={slots} value={slots}>{slots}</option>)}</select> : <input type="number" min="1" max="500" value={count} onChange={(event) => setCount(Number(event.target.value))} />}</label>
+          {gameType === 'MINE' ? <label>{t('mineTargetDigit')}<select value={mineDigit} onChange={(event) => setMineDigit(Number(event.target.value))}>{Array.from({ length: 10 }, (_, digit) => <option key={digit} value={digit}>{digit}</option>)}</select></label> : <label>{t('distribution')}<select value={mode} onChange={(event) => setMode(event.target.value as 'RANDOM' | 'EQUAL')}><option value="RANDOM">{t('randomShares')}</option><option value="EQUAL">{t('equalShares')}</option></select></label>}
+        </div>
+        {gameType === 'MINE' && <div className="info-callout"><strong>{t('minePayoutInterpretationTitle')}</strong><p>{t('minePayoutInterpretation')}</p><small>{t('minePrecisionNote')}</small></div>}
         <label>{t('expires')}<select value={expiresInMinutes} onChange={(event) => setExpiresInMinutes(Number(event.target.value))}><option value={60}>{t('inOneHour')}</option><option value={1440}>{t('in24Hours')}</option><option value={10080}>{t('in7Days')}</option></select></label>
-        <label className="audience-field">{t('claimAudience')}<select value={audience} onChange={(event) => { setAudience(event.target.value as 'ALL' | 'SELECTED'); setMessage(''); }}><option value="SELECTED">{t('selectedMembersOnly')}</option><option value="ALL">{t('allGroupMembers')}</option></select></label>
-        {audience === 'SELECTED' && groupId && <GroupMemberPicker key={groupId} groupId={groupId} selectedTelegramIds={eligibleTelegramIds} onSelectionChange={setEligibleTelegramIds} selectedTelegramUsernames={eligibleTelegramUsernames} onUsernamesChange={setEligibleTelegramUsernames} />}
-        {audience === 'SELECTED' && !groupId && <div className="info-callout"><strong>{t('selectGroupForMembers')}</strong><p>{t('selectGroupForMembersHint')}</p></div>}
-        {audience === 'SELECTED' && groupId && eligibleTelegramIds.length + eligibleTelegramUsernames.length === 0 && <div className="selection-required">{t('selectAtLeastOneEligible')}</div>}
+        <div className="info-callout"><strong>{t('adminRecipientsOnlyTitle')}</strong><p>{t('adminRecipientsOnlyText')}</p></div>
+        {groupId && <GroupMemberPicker key={groupId} groupId={groupId} selectedTelegramIds={eligibleTelegramIds} onSelectionChange={setEligibleTelegramIds} selectedTelegramUsernames={eligibleTelegramUsernames} onUsernamesChange={setEligibleTelegramUsernames} />}
+        {!groupId && <div className="info-callout"><strong>{t('selectGroupForMembers')}</strong><p>{t('selectGroupForMembersHint')}</p></div>}
+        {groupId && eligibleTelegramIds.length + eligibleTelegramUsernames.length === 0 && <div className="selection-required">{t('selectAtLeastOneEligible')}</div>}
         <div className="treasury-line"><span>{t('treasuryWallet')}</span><strong>{setup.data?.treasury ? t('usdtAvailable', money(setup.data.treasury.wallet?.availableMinor)) : setup.data?.treasuryTelegramIdConfigured ? t('idConfigured') : t('telegramIdNotConfigured')}</strong></div>
         {setup.data?.treasury && <div className="treasury-topup">
           {testing.data?.testCreditEnabled
@@ -126,7 +190,51 @@ function EnvelopesPage() {
       </section>
       <div className="info-callout envelope-help"><strong>{t('whatMembersSee')}</strong><p>{t('whatMembersSeeText')}</p></div>
     </div>
-    <section className="panel table-panel envelope-history"><div className="panel-head"><div><h2>{t('recentEnvelopes')}</h2><p>{t('recentEnvelopesNote')}</p></div></div><table><thead><tr><th>{t('colEnvelope')}</th><th>{t('colGroup')}</th><th>{t('colAmount')}</th><th>{t('colClaims')}</th><th>{t('colMode')}</th><th>{t('colAudience')}</th><th>{t('colStatus')}</th></tr></thead><tbody>{setup.data?.recent.map((item) => <tr key={item.id}><td><strong>#{item.id.slice(0, 8)}</strong><small>{date(item.createdAt)}</small></td><td><strong>{groupName(item.groupId)}</strong><small>{item.groupId}</small></td><td><strong>{money(item.totalMinor)} USDT</strong><small>{money(item.remainingMinor)} {t('remaining')}</small></td><td>{item._count.claims} / {item.totalSlots}</td><td>{item.mode === 'RANDOM' ? t('randomShares') : t('equalShares')}</td><td><strong>{item.audience === 'SELECTED' ? t('selectedMembersOnly') : t('allGroupMembers')}</strong>{item.audience === 'SELECTED' && <small>{t('selectedMemberCount', item._count.eligibleUsers + item._count.eligibleUsernames)}</small>}</td><td><Status status={item.status} /></td></tr>)}</tbody></table>{!setup.data?.recent.length && <Empty text={t('noEnvelopesYet')} />}</section>
+    <section className="panel mine-report-panel">
+      <div className="panel-head"><div><h2>{t('mineReportTitle')}</h2><p>{t('mineReportRecentScope')}</p></div><button type="button" className="refresh-button" onClick={() => void setup.refetch()}>{t('refresh')}</button></div>
+      <div className="mine-report-kpis">
+        <div><span>{t('mineInvestorAccount')}</span><strong>{setup.data?.treasury ? `${setup.data.treasury.firstName} · ${setup.data.treasury.telegramId}` : t('treasuryNotConfigured')}</strong><small>{t('mineInvestorAccountNote')}</small></div>
+        <div><span>{t('mineInvestorGrossPayout')}</span><strong>{money(setup.data?.mineReport.grossPayoutMinor)} USDT</strong><small>{setup.data?.mineReport.hitCount ?? 0} {t('mineWinningClaims')} · {t('grossNotProfit')}</small></div>
+        <div><span>{t('mineNetRealizedPnl')}</span><strong>{money(setup.data?.mineReport.netRealizedMinor)} USDT</strong><small>{t('mineNetRealizedNote')}</small></div>
+        <div><span>{t('mineActiveOutstanding')}</span><strong>{money(setup.data?.mineReport.activeOutstandingMinor)} USDT</strong><small>{t('mineActiveOutstandingNote')}</small></div>
+      </div>
+      {mineEnvelopes.length === 0
+        ? <Empty text={t('noMineResultsYet')} />
+        : <div className="mine-report-list">{mineEnvelopes.map((envelope) => {
+          const hitCount = envelopeMineHits(envelope);
+          const senderIsTreasury = envelope.sender.telegramId === setup.data?.treasury?.telegramId;
+          return <article className="mine-report-envelope" key={envelope.id}>
+            <div className="mine-report-envelope-head">
+              <div><strong>#{envelope.id.slice(0, 8)} · {t('mineTargetDigit')}: {envelope.mineDigit ?? '—'}</strong><small>{t('mineSenderLabel')}: {envelope.sender.firstName}{envelope.sender.username ? ` · @${envelope.sender.username}` : ''} · {envelope.sender.telegramId}{senderIsTreasury ? ` · ${t('treasuryInvestorLabel')}` : ''}</small><small>{date(envelope.createdAt)} · {t('mineClaimCount')}: {envelope._count.claims}/{envelope.totalSlots}</small></div>
+              <button type="button" className="table-action" aria-expanded={selectedMineEnvelopeId === envelope.id} onClick={() => setSelectedMineEnvelopeId((current) => current === envelope.id ? null : envelope.id)}>{selectedMineEnvelopeId === envelope.id ? t('hideClaimResults') : t('viewClaimResults')}</button>
+            </div>
+            <div className="mine-report-metrics"><span>{t('mineWinningClaims')}: <strong>{hitCount}</strong></span><span>{t('mineGrossPayoutToSender')}: <strong>{money(envelopeMinePayout(envelope))} USDT</strong></span></div>
+          </article>;
+        })}</div>}
+      {selectedMineEnvelope && <div className="mine-claim-outcomes">
+        <div className="panel-head"><div><h3>{t('claimResultsFor', selectedMineEnvelope.id.slice(0, 8))}</h3><p>{t('mineClaimResultsNote')}</p></div></div>
+        {selectedMineEnvelope.claims.length === 0
+          ? <Empty text={t('noClaimsForEnvelope')} />
+          : <div className="table-panel"><table><thead><tr><th>{t('colUserIdentity')}</th><th>{t('colShareAmount')}</th><th>{t('mineLastDigit')}</th><th>{t('mineOutcome')}</th><th>{t('minePayoutToSender')}</th></tr></thead><tbody>{selectedMineEnvelope.claims.map((claim) => <tr key={claim.id}><td><strong>{claim.user.firstName}</strong><small>{claim.user.username ? `@${claim.user.username} · ` : ''}Telegram ID {claim.user.telegramId}</small></td><td>{money(claim.amountMinor)} USDT</td><td>{claim.lastDigit ?? '—'}</td><td><span className={`status ${claim.mineHit ? 'completed' : 'failed'}`}>{t(claim.mineHit ? 'mineClaimHit' : 'mineClaimMiss')}</span></td><td>{claim.mineHit ? `${money(claim.payoutMinor)} USDT` : '—'}</td></tr>)}</tbody></table></div>}
+      </div>}
+    </section>
+    <section className="panel developer-message-panel">
+      <div className="panel-head"><div><h2>{t('developerDraftTitle')}</h2><p>{t('developerDraftSubtitle')}</p></div></div>
+      <label className="developer-message-label">{t('developerDraftLabel')}<textarea rows={5} maxLength={5000} value={developerMessage} onChange={(event) => { setDeveloperMessage(event.target.value); setDeveloperDraftSaved(false); setDeveloperMessageCopied(false); setDeveloperDraftError(''); }} placeholder={t('developerDraftPlaceholder')} /></label>
+      <div className="developer-message-actions"><div><button type="button" className="table-action" disabled={!developerMessage.trim()} onClick={previewDeveloperDraft}>{t('previewToDeveloper')}</button></div><small>{developerDraftSaved ? t('developerDraftSavedShared') : t('developerDraftSharedNote')}</small></div>
+      {developerDraftError && <div className="alert danger developer-draft-error">{developerDraftError}</div>}
+      <div className="developer-message-history"><h3>{t('developerSavedRequests')}</h3>{developerMessages.isError ? <div className="alert danger">{(developerMessages.error as Error).message}</div> : developerMessages.isLoading ? <small>{t('loadingDeveloperRequests')}</small> : developerMessages.data?.messages.length ? developerMessages.data.messages.map((saved) => <article key={saved.id}><header><strong>{saved.adminUsername}</strong><time>{date(saved.createdAt)}</time></header><p>{saved.message}</p></article>) : <small>{t('noDeveloperRequests')}</small>}</div>
+    </section>
+    {developerPreviewOpen && <div className="developer-preview-backdrop" role="dialog" aria-modal="true" aria-labelledby="developer-preview-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeveloperPreviewOpen(false); }}>
+      <section className="developer-preview-modal">
+        <header><h2 id="developer-preview-title">{t('developerPreviewTitle')}</h2><button type="button" aria-label={t('close')} onClick={() => setDeveloperPreviewOpen(false)}>×</button></header>
+        <div className="alert warning">{t('developerPreviewNotSent')}</div>
+        {developerDraftError && <div className="alert danger">{developerDraftError}</div>}
+        <pre>{developerMessage}</pre>
+        <div className="developer-preview-actions"><button type="button" className="table-action" onClick={() => void copyDeveloperDraft()}>{developerMessageCopied ? t('developerMessageCopied') : t('copyDeveloperMessage')}</button><button type="button" className="table-action" disabled={saveDeveloperMessage.isPending} onClick={saveDeveloperDraft}>{saveDeveloperMessage.isPending ? t('savingDeveloperDraft') : t('saveDeveloperDraft')}</button><button type="button" className="table-action" onClick={() => setDeveloperPreviewOpen(false)}>{t('close')}</button></div>
+      </section>
+    </div>}
+    <section className="panel table-panel envelope-history"><div className="panel-head"><div><h2>{t('recentEnvelopes')}</h2><p>{t('recentEnvelopesNote')}</p></div></div><table><thead><tr><th>{t('colEnvelope')}</th><th>{t('colGroup')}</th><th>{t('colAmount')}</th><th>{t('colClaims')}</th><th>{t('colMode')}</th><th>{t('colAudience')}</th><th>{t('colStatus')}</th></tr></thead><tbody>{setup.data?.recent.map((item) => <tr key={item.id}><td><strong>#{item.id.slice(0, 8)}</strong><small>{date(item.createdAt)}</small></td><td><strong>{groupName(item.groupId)}</strong><small>{item.groupId}</small></td><td><strong>{money(item.totalMinor)} USDT</strong><small>{money(item.remainingMinor)} {t('remaining')}</small></td><td>{item._count.claims} / {item.totalSlots}</td><td>{item.gameType === 'MINE' ? `${t('mineMode')} · ${t('mineTargetDigit')}: ${item.mineDigit ?? '—'}` : item.mode === 'RANDOM' ? t('randomShares') : t('equalShares')}</td><td><strong>{item.audience === 'SELECTED' ? t('selectedMembersOnly') : t('allGroupMembers')}</strong>{item.audience === 'SELECTED' && <small>{t('selectedMemberCount', item._count.eligibleUsers + item._count.eligibleUsernames)}</small>}</td><td><Status status={item.status} /></td></tr>)}</tbody></table>{!setup.data?.recent.length && <Empty text={t('noEnvelopesYet')} />}</section>
   </PageFrame>;
 }
 

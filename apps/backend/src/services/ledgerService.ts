@@ -28,6 +28,11 @@ async function lockWallet(tx: Transaction, userId: string): Promise<WalletRow> {
   return rows[0];
 }
 
+/** Lock participant wallets in stable order before a two-party game settlement. */
+export async function lockWalletAccounts(tx: Transaction, userIds: string[]): Promise<void> {
+  for (const userId of [...new Set(userIds)].sort()) await lockWallet(tx, userId);
+}
+
 export async function debitWallet(
   tx: Transaction,
   userId: string,
@@ -138,7 +143,7 @@ export async function getWalletSummary(userId: string) {
 // Local structural types keep this file type-safe even where inference is
 // unavailable; they are fully compatible with the generated Prisma client.
 type LedgerEntryRow = { id: string; userId: string; amountMinor: bigint; type: string; direction: string; balanceAfterMinor: bigint; referenceType: string; referenceId: string; createdAt: Date };
-type EnvelopeMetaRow = { id: string; mode: string; totalSlots: number; remainingSlots: number; status: string; sender: { firstName: string; username: string | null } };
+type EnvelopeMetaRow = { id: string; mode: string; gameType: string; mineDigit: number | null; totalSlots: number; remainingSlots: number; status: string; sender: { firstName: string; username: string | null } };
 
 export async function getLedger(userId: string, limit = 50) {
   const entries = (await prisma.ledgerEntry.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: Math.min(Math.max(limit, 1), 100) })) as LedgerEntryRow[];
@@ -152,6 +157,8 @@ export async function getLedger(userId: string, limit = 50) {
     select: {
       id: true,
       mode: true,
+      gameType: true,
+      mineDigit: true,
       totalSlots: true,
       remainingSlots: true,
       status: true,
@@ -163,6 +170,8 @@ export async function getLedger(userId: string, limit = 50) {
     senderFirstName: envelope.sender.firstName,
     senderUsername: envelope.sender.username,
     mode: envelope.mode,
+    gameType: envelope.gameType,
+    mineDigit: envelope.mineDigit,
     totalSlots: envelope.totalSlots,
     remainingSlots: envelope.remainingSlots,
     status: envelope.status

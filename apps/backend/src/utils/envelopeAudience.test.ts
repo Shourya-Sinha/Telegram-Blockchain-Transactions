@@ -75,7 +75,10 @@ test('admin recipient selector retains profile and numeric-ID selection while ad
   assert.match(picker, /members\.map\(\(member\)/);
   assert.match(picker, /const addManualIds/);
   assert.match(picker, /result\.unresolved/);
-  assert.match(createForm, /eligibleUsernames: audience === 'SELECTED' \? eligibleTelegramUsernames/);
+  assert.match(createForm, /audience: 'SELECTED'/);
+  assert.match(createForm, /eligibleUsernames/);
+  assert.doesNotMatch(createForm, /setAudience/);
+  assert.match(service, /input\.actorId && parsed\.audience !== 'SELECTED'/);
   assert.match(service, /tx\.redEnvelopeEligibleUsername\.createMany/);
 });
 

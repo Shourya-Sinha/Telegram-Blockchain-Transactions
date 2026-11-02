@@ -183,3 +183,26 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 .lang-btn .lang-flag { font-size: 13px; line-height: 1; }
 .lang-btn.active { color: #cfe4f7; background: rgba(90, 156, 227, .18); box-shadow: inset 0 0 0 1px rgba(120, 178, 236, .35); }
 .lang-btn:not(.active):active { transform: scale(.94); }
+
+/* Mine/sweep rules and result disclosure. */
+.rules-card { padding: 17px; border: 1px solid rgba(210, 169, 99, .22); border-radius: 19px; background: linear-gradient(145deg, rgba(24, 35, 51, .94), rgba(14, 25, 41, .92)); }
+.rules-compliance { margin-top: 10px; padding: 10px 12px; border-radius: 10px; color: #edc982; background: rgba(224, 173, 75, .1); font-size: 10px; line-height: 1.5; }
+.how-to-play-intro { margin: 4px 0 10px; color: #aab8c9; font-size: 11px; line-height: 1.55; }
+.how-to-play-list { margin: 0; padding: 0; list-style: none; counter-reset: play-step; }
+.how-to-play-list li { position: relative; display: grid; grid-template-columns: 25px minmax(0, 1fr); column-gap: 10px; padding: 12px 0; border-top: 1px solid rgba(136, 157, 183, .13); }
+.how-to-play-list li::before { counter-increment: play-step; content: counter(play-step); grid-column: 1; grid-row: 1 / span 2; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: #f0cf83; background: rgba(224, 173, 75, .12); font-size: 10px; font-weight: 800; }
+.how-to-play-list li strong { grid-column: 2; color: #e4edf6; font-size: 12px; line-height: 1.4; }
+.how-to-play-list li p { grid-column: 2; margin: 5px 0 0; color: #9aaabd; font-size: 11px; line-height: 1.6; }
+.how-to-play-list li.how-to-play-critical { margin: 5px 0; padding: 12px; border: 1px solid rgba(231, 190, 97, .22); border-radius: 12px; background: rgba(193, 141, 52, .08); }
+.how-to-play-list li.how-to-play-critical::before { color: #f0cf83; background: rgba(224, 173, 75, .2); }
+.how-to-play-list li.how-to-play-critical strong { color: #f0cf83; }
+.hb-mine-result { display: flex; flex-direction: column; gap: 7px; width: 100%; max-width: 290px; margin: 13px auto 0; padding: 11px 12px; border: 1px solid #33445a; border-radius: 12px; background: rgba(6, 18, 31, .58); text-align: center; }
+.hb-mine-result span { color: #a5b4c7; font-size: 10px; }
+.hb-mine-result strong { font-size: 11px; line-height: 1.45; }
+.hb-mine-result.hit { border-color: rgba(242, 154, 108, .4); background: rgba(154, 68, 54, .18); }
+.hb-mine-result.hit strong { color: #ffd0b6; }
+.hb-mine-result.miss { border-color: rgba(83, 192, 148, .3); background: rgba(32, 115, 91, .13); }
+.hb-mine-result.miss strong { color: #9af0c9; }
+.hb-claim-game { padding: 3px 6px; border-radius: 6px; font-size: 8px; font-style: normal; font-weight: 800; white-space: nowrap; }
+.hb-claim-game.hit { color: #ffca9a; background: rgba(224, 144, 81, .13); }
+.hb-claim-game.miss { color: #88d7b4; background: rgba(54, 190, 131, .1); }

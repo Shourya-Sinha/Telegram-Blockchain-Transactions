@@ -66,7 +66,9 @@ export function EnvelopeRow({ entry, onOpen }: { entry: LedgerEntry; onOpen?: Op
   const isClaim = entry.type === 'CLAIM';
   const isRefund = entry.type === 'REFUND';
   const senderName = meta?.senderFirstName?.trim() || meta?.senderUsername?.trim();
-  const modeLabel = meta?.mode === 'EQUAL' ? t('modeEqual') : meta?.mode === 'RANDOM' ? t('modeRandom') : undefined;
+  const modeLabel = meta?.gameType === 'MINE'
+    ? `${t('mineMode')} · ${t('mineTargetDigit')}: ${meta.mineDigit ?? '—'}`
+    : meta?.mode === 'EQUAL' ? t('modeEqual') : meta?.mode === 'RANDOM' ? t('modeRandom') : undefined;
   const subtitleParts = [formatDateTime(entry.createdAt)];
   if (modeLabel) subtitleParts.push(modeLabel);
   if (meta?.totalSlots) subtitleParts.push(t('sharesLabel', { count: meta.totalSlots }));

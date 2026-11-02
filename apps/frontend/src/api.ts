@@ -49,7 +49,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
  * (network blips, rate limits, membership checks, 5xx) can be retried, so the
  * envelope UI keeps its seal tappable instead of dead-ending.
  */
-const TERMINAL_ENVELOPE_CODES = ['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE'];
+const TERMINAL_ENVELOPE_CODES = ['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE', 'MINE_SENDER_CANNOT_CLAIM'];
 export function isTerminalEnvelopeError(error: unknown): boolean {
   return error instanceof ApiError && Boolean(error.code && TERMINAL_ENVELOPE_CODES.includes(error.code));
 }
@@ -75,6 +75,8 @@ export interface LedgerEnvelopeMeta {
   senderFirstName: string;
   senderUsername?: string | null;
   mode: 'RANDOM' | 'EQUAL';
+  gameType?: 'STANDARD' | 'MINE';
+  mineDigit?: number | null;
   totalSlots: number;
   remainingSlots: number;
   status: 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'REFUNDED';
@@ -93,21 +95,24 @@ export interface Deposit {
 }
 export interface EnvelopeClaimView {
   id: string; amountMinor: string; claimedAt: string;
+  lastDigit?: number | null; mineHit?: boolean | null; payoutMinor?: string;
   user: { firstName: string; username?: string };
   mine?: boolean;
 }
 export interface EnvelopeDetail {
   id: string; groupId: string; totalMinor: string; remainingMinor: string;
   totalSlots: number; remainingSlots: number;
-  mode: 'RANDOM' | 'EQUAL'; status: 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'REFUNDED';
+  mode: 'RANDOM' | 'EQUAL'; gameType: 'STANDARD' | 'MINE'; mineDigit?: number | null;
+  status: 'ACTIVE' | 'COMPLETED' | 'EXPIRED' | 'REFUNDED';
   expiresAt: string; createdAt: string;
   sender: { firstName: string; username?: string };
   claims: EnvelopeClaimView[];
 }
 export interface ClaimResponse {
   kind: 'claimed';
-  claim: { amountMinor: string };
+  claim: { amountMinor: string; lastDigit?: number | null; mineHit?: boolean | null; payoutMinor?: string };
   availableMinor: string;
+  gameResult?: { gameType: 'MINE'; targetDigit: number; lastDigit: number; hit: boolean; payoutMinor: string; reservedMinor: string };
 }
 export interface Withdrawal {
   id: string; amountMinor: string; feeMinor: string; toAddress: string; chain: string;

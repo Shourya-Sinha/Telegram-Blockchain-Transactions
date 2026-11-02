@@ -93,6 +93,9 @@ export const config = {
   },
   rateLimitPerMinute: number('RATE_LIMIT_PER_MINUTE', 60),
   claimRateLimitPerMinute: number('CLAIM_RATE_LIMIT_PER_MINUTE', 20),
+  // Real-funds mine games stay disabled unless an operator explicitly enables them
+  // after legal, custody, and payout-risk review. Test-funds games remain available.
+  mineGameRealFundsEnabled: required('MINE_GAME_REAL_FUNDS_ENABLED', 'false') === 'true',
   // Test credits mint internal ledger balance and must never enter real-funds mode.
   allowDevCredit: required('ALLOW_DEV_CREDIT', 'false') === 'true' && nodeEnv !== 'production' && fundsMode === 'test',
   devAutoCreditMinor: BigInt(Math.round(Math.max(0, Math.min(10_000, number('DEV_AUTO_CREDIT_USDT', 0))) * 1_000_000)),

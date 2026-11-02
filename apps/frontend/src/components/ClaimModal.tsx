@@ -10,7 +10,7 @@ type Phase = 'sealed' | 'opening' | 'done';
 /** How long the flap/coin animation runs before the result is revealed. */
 const OPEN_ANIMATION_MS = 1250;
 const CLAIM_REQUIREMENT_ERROR_CODES = new Set([
-  'ACCOUNT_TOO_NEW', 'MESSAGE_REQUIREMENT', 'CLAIM_LIMIT', 'GROUP_DISABLED', 'ENVELOPES_DISABLED'
+  'ACCOUNT_TOO_NEW', 'MESSAGE_REQUIREMENT', 'CLAIM_LIMIT', 'GROUP_DISABLED', 'ENVELOPES_DISABLED', 'GAME_COLLATERAL_REQUIRED'
 ]);
 
 function apiErrorCode(error: unknown): string | undefined {
@@ -108,6 +108,11 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
   }, [phase, animDone, mutation.isPending, mutation.isError, mutation.error]);
 
   const claimed = mutation.data?.claim?.amountMinor ?? myClaim?.amountMinor;
+  const mineTarget = detail.data?.mineDigit ?? mutation.data?.gameResult?.targetDigit;
+  const mineLastDigit = mutation.data?.gameResult?.lastDigit ?? myClaim?.lastDigit ?? mutation.data?.claim?.lastDigit;
+  const mineHitResult = mutation.data?.gameResult?.hit ?? myClaim?.mineHit ?? mutation.data?.claim?.mineHit;
+  const minePayoutMinor = mutation.data?.gameResult?.payoutMinor ?? myClaim?.payoutMinor ?? mutation.data?.claim?.payoutMinor;
+  const mineTotalMinor = mutation.data?.gameResult?.reservedMinor ?? detail.data?.totalMinor;
   const retryableClaimError = Boolean(claimError) && !isTerminalEnvelopeError(claimError);
   const claimErrorMessage = claimError ? apiErrorMessage(t, claimError) : undefined;
   const detailErrorMessage = detailFailed ? apiErrorMessage(t, detail.error) : undefined;
@@ -121,7 +126,8 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
       : detail.data?.status === 'EXPIRED' ? t('envelopeStatusExpired')
         : detail.data?.status === 'REFUNDED' ? t('envelopeStatusRefunded')
           : detail.isLoading ? t('loadingEnvelope') : t('envelopeLoadFailed');
-  const modeLabel = detail.data?.mode === 'EQUAL' ? t('modeEqual') : detail.data?.mode === 'RANDOM' ? t('modeRandom') : undefined;
+  const modeLabel = detail.data?.gameType === 'MINE' ? t('mineMode')
+    : detail.data?.mode === 'EQUAL' ? t('modeEqual') : detail.data?.mode === 'RANDOM' ? t('modeRandom') : undefined;
   const summaryLine = detail.data
     ? `${t('claimsProgress', { claimed: claimedCount, total: detail.data.totalSlots })} · ${statusLabel}`
     : detail.isLoading ? t('loadingEnvelope') : (detailErrorMessage ?? t('envelopeDetailsUnavailable'));
@@ -151,8 +157,14 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
         <div className="hb-body">
           <div className="hb-reveal">
             {phase === 'done' && claimed && <>
-              <span className="hb-reveal-label">{t('claimAdded')}</span>
+              <span className="hb-reveal-label">{t(detail.data?.gameType === 'MINE' || mutation.data?.gameResult ? 'claimMineAdded' : 'claimAdded')}</span>
               <div className="hb-amount">+{formatMinor(claimed)} <small>USDT</small></div>
+              {typeof mineHitResult === 'boolean' && mineTarget != null && mineLastDigit != null && <div className={`hb-mine-result ${mineHitResult ? 'hit' : 'miss'}`} aria-live="polite">
+                <span>{t('claimGameDigit', { target: mineTarget, digit: mineLastDigit })}</span>
+                <strong>{mineHitResult
+                  ? t('claimGameHit', { amount: formatMinor(minePayoutMinor ?? mineTotalMinor ?? '0') })
+                  : t('claimGameMiss', { amount: formatMinor(mineTotalMinor ?? '0') })}</strong>
+              </div>}
             </>}
             {phase === 'done' && !claimed && <div className="hb-missed">{revealText}</div>}
           </div>
@@ -183,6 +195,7 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
         <div><span>{t('envelopeTotalLabel')}</span><strong>{formatMinor(detail.data.totalMinor)} USDT</strong></div>
         <div><span>{t('sharesClaimedLabel')}</span><strong>{t('claimsProgress', { claimed: claimedCount, total: detail.data.totalSlots })}</strong></div>
         {modeLabel && <div><span>{t('distributionLabel')}</span><strong>{modeLabel}</strong></div>}
+        {detail.data.gameType === 'MINE' && detail.data.mineDigit != null && <div><span>{t('mineTargetDigit')}</span><strong>{detail.data.mineDigit}</strong></div>}
         <div><span>{t('envelopeStatusHeading')}</span><strong>{statusLabel}</strong></div>
         {myClaim && <div><span>{t('yourShareLabel')}</span><strong className="credit-text">+{formatMinor(myClaim.amountMinor)} USDT</strong></div>}
         <div><span>{detail.data.status === 'ACTIVE' ? t('expiresAtLabel') : t('expiredAtLabel')}</span><strong>{formatDateTime(detail.data.expiresAt)}</strong></div>
@@ -195,6 +208,7 @@ export function ClaimModal({ envelopeId, viewOnly = false, onClose, onShowLedger
           return <div className="hb-claim" key={claim.id}>
             <span className="hb-claim-avatar">{claimantName.slice(0, 1).toUpperCase()}</span>
             <span className="hb-claim-name">{claimantName}{claim.mine && <em>{t('youLabel')}</em>}</span>
+            {detail.data?.gameType === 'MINE' && typeof claim.mineHit === 'boolean' && <small className={`hb-claim-game ${claim.mineHit ? 'hit' : 'miss'}`}>{t(claim.mineHit ? 'mineHitBadge' : 'mineMissBadge', { digit: claim.lastDigit ?? '—' })}</small>}
             <small className="hb-claim-time">{formatClock(claim.claimedAt)}</small>
             <span className="hb-claim-amount">{formatMinor(claim.amountMinor)}</span>
           </div>;

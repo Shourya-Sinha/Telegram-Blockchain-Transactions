@@ -51,7 +51,7 @@ test('a red envelope that fails to open can be retried instead of dead-ending', 
   // Definitive results (including audience denial) stop here; transient and
   // satisfiable requirement failures rewind to the seal so the user can retry.
   const api = read('../frontend/src/api.ts');
-  assert.match(api, /TERMINAL_ENVELOPE_CODES = \['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE'\]/);
+  assert.match(api, /TERMINAL_ENVELOPE_CODES = \['ALREADY_CLAIMED', 'ENVELOPE_CLOSED', 'ENVELOPE_EXPIRED', 'ENVELOPE_NOT_FOUND', 'ENVELOPE_NOT_ELIGIBLE', 'MINE_SENDER_CANNOT_CLAIM'\]/);
   assert.match(claim, /if \(mutation\.isError && !isTerminalEnvelopeError\(mutation\.error\)\) \{ setPhase\('sealed'\); return; \}/);
   assert.match(claim, /className="hb-retry"/);
   // A failed envelope lookup no longer locks the envelope: it offers a retry.
@@ -145,7 +145,7 @@ test('a redeploy cannot be masked by a WebView-cached bundle', () => {
 
 test('wallet responses are never served from the WebView cache', () => {
   const api = read('../frontend/src/api.ts');
-  assert.match(api, /fetch\(path, \{ cache: 'no-store', \.\.\.options, headers \}\)/);
+  assert.match(api, /fetch\(resolveApiUrl\(path\), \{ cache: 'no-store', \.\.\.options, headers \}\)/);
   assert.match(api, /NETWORK_ERROR/);
 
   const server = read('src/server.ts');

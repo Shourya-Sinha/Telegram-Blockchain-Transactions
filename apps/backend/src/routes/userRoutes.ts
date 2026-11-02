@@ -95,6 +95,8 @@ userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (
     total: z.string().regex(/^\d+(\.\d{1,6})?$/),
     count: z.number().int().min(1).max(500),
     mode: z.enum(['RANDOM', 'EQUAL']).default('RANDOM'),
+    gameType: z.enum(['STANDARD', 'MINE']).default('STANDARD'),
+    mineDigit: z.number().int().min(0).max(9).optional(),
     groupId: z.string().max(20).regex(/^-?\d+$/),
     expiresInMinutes: z.number().int().min(1).max(7 * 24 * 60).default(1440)
   }).parse(req.body);
@@ -112,9 +114,12 @@ userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
   // Flag which claim belongs to the viewer so the Mini App can reopen an
   // already-opened envelope straight to its detail view, exactly like WeChat.
   // Internal user ids are not exposed — only the display name of each claimer.
-  const claims = envelope.claims.map((claim: { id: string; userId: string; amountMinor: bigint; claimedAt: Date; user: { firstName: string; username: string | null } }) => ({
+  const claims = envelope.claims.map((claim: { id: string; userId: string; amountMinor: bigint; claimedAt: Date; lastDigit: number | null; mineHit: boolean | null; payoutMinor: bigint; user: { firstName: string; username: string | null } }) => ({
     id: claim.id,
     amountMinor: claim.amountMinor,
+    lastDigit: claim.lastDigit,
+    mineHit: claim.mineHit,
+    payoutMinor: claim.payoutMinor,
     claimedAt: claim.claimedAt,
     user: claim.user,
     mine: claim.userId === user.id
@@ -124,9 +129,9 @@ userRouter.get('/envelopes/:id', asyncHandler(async (req, res) => {
 userRouter.post('/envelopes/:id/claim', rateLimit('envelope-claim', config.claimRateLimitPerMinute), asyncHandler(async (req, res) => {
   const envelope = await getEnvelope(String(req.params.id));
   const user = req.telegramUser!;
-  // A sender can reopen an active envelope from their own History and take an
-  // unclaimed share. Other users still must be verified as current group
-  // members before claiming from a forwarded/direct envelope link.
+  // Standard-envelope senders can reopen their own active envelope from
+  // History. Mine-game senders are explicitly blocked in claimEnvelope. Other
+  // users must be verified as current group members before claiming a forwarded link.
   if (envelope.senderId !== user.id) await assertTelegramGroupMembership(envelope.groupId, user.telegramId);
   const result = await claimEnvelope(user.id, envelope.id, req.ip);
   const latestEnvelope = await getEnvelope(envelope.id);
