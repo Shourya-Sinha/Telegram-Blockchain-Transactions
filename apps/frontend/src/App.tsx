@@ -10,6 +10,7 @@ import { WalletScreen } from './screens/WalletScreen';
 import { DeFiScreen } from './screens/DeFiScreen';
 import { YieldScreen } from './screens/YieldScreen';
 import { AppsScreen } from './screens/AppsScreen';
+import { TestGamesScreen } from './screens/TestGamesScreen';
 import { useT, useLang } from './i18n';
 
 const demoMe: MeResponse = { id: 'demo', telegramId: '0', firstName: 'friend', isAdmin: false, fundsMode: 'test', depositsEnabled: false, withdrawalsEnabled: false, withdrawalMode: 'disabled', locale: 'en', wallet: { id: 'demo-wallet', availableMinor: '0', lockedMinor: '0', version: 0 }, depositAddress: '' };
@@ -41,12 +42,22 @@ function readLaunchTarget(): { envelopeId?: string; openHistory?: boolean } {
   return { envelopeId, openHistory: view === 'history' };
 }
 
+function referralCodeFromLaunch(): string | undefined {
+  const search = new URLSearchParams(window.location.search);
+  const hash = paramsFromHash();
+  const start = telegramStartParam() || search.get('tgWebAppStartParam') || hash.get('tgWebAppStartParam') || search.get('startapp') || hash.get('startapp');
+  const candidate = search.get('ref') || hash.get('ref') || start || '';
+  const match = candidate.match(/^(?:agent_)?([A-F0-9]{12})$/i);
+  return match?.[1]?.toUpperCase();
+}
+
 export default function App() {
   const activeTab = useWalletStore((state) => state.activeTab);
   const setActiveTab = useWalletStore((state) => state.setActiveTab);
   const setMe = useWalletStore((state) => state.setMe);
   const setLang = useLang((state) => state.setLang);
   const t = useT();
+  const referralCode = referralCodeFromLaunch();
   const client = useQueryClient();
   // Screens stack: history → transaction details → red envelope. Back always
   // closes the top-most one, never the whole mini app.
@@ -72,6 +83,14 @@ export default function App() {
     try { if (localStorage.getItem('tma-lang')) return; } catch { /* ignore */ }
     setLang(meQuery.data.locale, { sync: false });
   }, [meQuery.data?.locale, setLang]);
+  useEffect(() => {
+    if (!meQuery.data || !referralCode) return;
+    // Attribution is first-touch only and the backend makes repeated requests idempotent.
+    void api('/api/agent/attribute', { method: 'POST', body: JSON.stringify({ inviteCode: referralCode }) }).catch(() => undefined);
+  }, [meQuery.data?.id, referralCode]);
+  useEffect(() => {
+    if (meQuery.data?.fundsMode === 'real' && activeTab === 'games') setActiveTab('wallet');
+  }, [meQuery.data?.fundsMode, activeTab, setActiveTab]);
   useEffect(() => {
     if (activeTab === 'wallet') return;
     if (historyOpen) setHistoryOpen(false);
@@ -117,7 +136,7 @@ export default function App() {
     <div className="app-shell">
       <div className="sheet-grabber" aria-hidden="true" />
       <div className="ambient ambient-one" /><div className="ambient ambient-two" />
-      {activeTab === 'wallet' && <WalletScreen me={me} onClaim={openEnvelope} showHistory={historyOpen} onShowHistory={() => setHistoryOpen(true)} onCloseHistory={() => setHistoryOpen(false)} onOpenDetail={setDetail} />}{activeTab === 'defi' && <DeFiScreen />}{activeTab === 'yield' && <YieldScreen />}{activeTab === 'apps' && <AppsScreen />}
+      {activeTab === 'wallet' && <WalletScreen me={me} onClaim={openEnvelope} showHistory={historyOpen} onShowHistory={() => setHistoryOpen(true)} onCloseHistory={() => setHistoryOpen(false)} onOpenDetail={setDetail} />}{activeTab === 'defi' && <DeFiScreen />}{activeTab === 'games' && <TestGamesScreen />}{activeTab === 'yield' && <YieldScreen />}{activeTab === 'apps' && <AppsScreen />}
       <BottomNav />
       {detail && <TransactionDetail key={detailTargetKey(detail)} target={detail} onClose={() => setDetail(undefined)} onOpenEnvelope={openEnvelope} />}
       {claimLaunch && <ClaimModal

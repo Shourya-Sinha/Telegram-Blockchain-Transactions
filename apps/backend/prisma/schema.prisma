@@ -50,6 +50,22 @@ enum EnvelopeAudience {
   SELECTED
 }
 
+enum TestGameVariant {
+  SINGLE_MINE
+  CHAIN_MINE
+  NINE_MULTI_MINE
+}
+
+enum TestGameRoundStatus {
+  OPEN
+  SETTLED
+}
+
+enum TestGamePayoutPolicy {
+  MULTIPLIER_INCLUDES_STAKE
+  MULTIPLIER_IS_PROFIT
+}
+
 enum Chain {
   TRC20
 }
@@ -92,8 +108,92 @@ model User {
   claims      RedEnvelopeClaim[]
   withdrawals Withdrawal[]
   deposits    Deposit[]
+  agentProfile Agent? @relation("AgentOwner")
+  referredByAgentId String? @db.Uuid
+  referredByAgent Agent? @relation("AgentReferrals", fields: [referredByAgentId], references: [id], onDelete: SetNull)
+  testGameBets TestGameBet[]
   @@index([createdAt])
   @@index([status])
+  @@index([referredByAgentId])
+}
+
+model Agent {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @unique @db.Uuid
+  inviteCode        String        @unique @db.VarChar(32)
+  commissionRateBps Int           @default(0)
+  active            Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  user              User          @relation("AgentOwner", fields: [userId], references: [id], onDelete: Cascade)
+  referrals         User[]        @relation("AgentReferrals")
+  testGameBets      TestGameBet[]
+  @@index([active, createdAt])
+}
+
+model TestGameProfile {
+  id             String          @id @default(uuid()) @db.Uuid
+  key            String          @unique @db.VarChar(64)
+  name           String          @db.VarChar(100)
+  stakeMinMinor  BigInt
+  stakeMaxMinor  BigInt
+  odds           Json
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  rounds         TestGameRound[]
+  @@index([active, key])
+}
+
+model TestGameRound {
+  id                           String                @id @default(uuid()) @db.Uuid
+  profileId                    String                @db.Uuid
+  profileName                  String                @db.VarChar(100)
+  stakeMinMinor                BigInt
+  stakeMaxMinor                BigInt
+  oddsSnapshot                 Json
+  variant                      TestGameVariant
+  packetCount                  Int
+  targetDigit                  Int                   @default(0)
+  status                       TestGameRoundStatus   @default(OPEN)
+  outcomeKey                   String?               @db.VarChar(40)
+  payoutPolicySelected         TestGamePayoutPolicy?
+  payoutPolicyApprovalReference String?               @db.VarChar(200)
+  createdByAdminId             String                @db.Uuid
+  createdAt                    DateTime              @default(now())
+  settledAt                    DateTime?
+  profile                      TestGameProfile       @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  bets                         TestGameBet[]
+  @@index([status, createdAt])
+  @@index([profileId, createdAt])
+}
+
+model TestGameBet {
+  id                          String        @id @default(uuid()) @db.Uuid
+  roundId                     String        @db.Uuid
+  userId                      String        @db.Uuid
+  agentId                     String?       @db.Uuid
+  outcomeKey                  String        @db.VarChar(40)
+  stakeMinor                  BigInt
+  multiplierHundredths        Int
+  agentCommissionRateBps      Int           @default(0)
+  agentCommissionMinor        BigInt        @default(0)
+  isWin                       Boolean?
+  payoutIncludesStakeMinor    BigInt        @default(0)
+  payoutIsProfitMinor         BigInt        @default(0)
+  netIncludesStakeMinor       BigInt        @default(0)
+  netIsProfitMinor            BigInt        @default(0)
+  selectedPayoutMinor         BigInt?
+  manualPayoutReference       String?       @db.VarChar(200)
+  manualPayoutAt              DateTime?
+  manualPayoutByAdminId       String?       @db.Uuid
+  createdAt                   DateTime      @default(now())
+  round                       TestGameRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  user                        User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  agent                       Agent?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  @@unique([roundId, userId, outcomeKey])
+  @@index([userId, createdAt])
+  @@index([agentId, createdAt])
+  @@index([roundId, isWin])
 }
 
 model WalletAccount {

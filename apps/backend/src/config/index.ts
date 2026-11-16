@@ -1,4 +1,4 @@
-﻿import { existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 
@@ -70,6 +70,7 @@ export const config = {
   // open the Mini App directly with a startapp payload instead of first opening
   // the bot private chat.
   telegramMiniAppShortName: required('TELEGRAM_MINI_APP_SHORT_NAME').trim(),
+  telegramBotUsername: required('TELEGRAM_BOT_USERNAME').trim().replace(/^@/, ''),
   publicAppUrl: required('PUBLIC_APP_URL', 'http://localhost:5173'),
   corsOrigins: required('CORS_ORIGINS', 'http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean),
   jwtSecret: required('JWT_SECRET', 'development-only-change-me'),

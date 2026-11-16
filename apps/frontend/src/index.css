@@ -206,3 +206,67 @@ body[data-sheet="native"] .sheet-grabber { display: none; }
 .hb-claim-game { padding: 3px 6px; border-radius: 6px; font-size: 8px; font-style: normal; font-weight: 800; white-space: nowrap; }
 .hb-claim-game.hit { color: #ffca9a; background: rgba(224, 144, 81, .13); }
 .hb-claim-game.miss { color: #88d7b4; background: rgba(54, 190, 131, .1); }
+
+/* Test-only poster-based sweep rounds and agent reports. */
+.test-games-screen { padding-bottom: 10px; }
+.game-test-banner, .game-assumptions { margin-bottom: 12px; padding: 13px 14px; border: 1px solid rgba(111, 185, 232, .28); border-radius: 14px; background: linear-gradient(135deg, rgba(31, 70, 103, .42), rgba(13, 27, 44, .82)); }
+.game-test-banner strong { display: block; color: #9bd1f2; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.game-test-banner p, .game-assumptions p { margin: 6px 0 0; color: #9fb1c3; font-size: 10px; line-height: 1.55; }
+.game-assumptions { border-color: rgba(231, 190, 97, .25); background: rgba(117, 85, 35, .1); }
+.game-assumptions > strong { color: #eccb82; font-size: 10px; }
+.game-assumptions p { color: #c4b58f; }
+.test-rounds-section, .test-bet-history, .agent-dashboard { padding: 15px; border: 1px solid rgba(119, 153, 185, .16); border-radius: 17px; background: rgba(12, 26, 43, .72); }
+.test-rounds-section .section-heading, .test-bet-history .section-heading, .agent-dashboard .section-heading { margin-bottom: 12px; }
+.test-round-list, .test-bet-list, .agent-player-list { display: grid; gap: 10px; }
+.test-round-card, .test-bet-row { padding: 13px; border: 1px solid #253b52; border-radius: 13px; background: rgba(7, 19, 33, .74); }
+.test-round-heading, .test-bet-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.test-round-heading h3 { margin: 4px 0; color: #e0edf7; font-size: 13px; }
+.test-round-heading small, .game-round-eyebrow { color: #7e94aa; font-size: 9px; }
+.game-round-eyebrow { color: #8ac6e8; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.live-pill { color: #8ce0bc; border: 1px solid rgba(95, 212, 163, .28); background: rgba(50, 149, 111, .13); }
+.test-game-limits { margin: 10px 0; padding: 8px 9px; border-radius: 8px; color: #879db4; background: rgba(38, 65, 90, .24); font-size: 9px; }
+.test-game-limits strong { color: #bdd9ec; }
+.test-game-odds > strong { display: block; margin: 3px 0 7px; color: #aebfd0; font-size: 9px; }
+.test-game-odds > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.test-game-odds > div > small { grid-column: 1 / -1; margin: 0 0 2px; color: #8b9caf; font-size: 8px; line-height: 1.45; }
+.test-game-odds span { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 7px 8px; border: 1px solid #243950; border-radius: 8px; color: #a9bdcf; background: #0d1d30; cursor: pointer; }
+.test-game-odds span.selected { border-color: #5ca9d5; background: rgba(52, 114, 153, .22); }
+.test-game-odds span b { overflow-wrap: anywhere; font-size: 9px; font-weight: 650; }
+.test-game-odds span em { color: #87acc6; font-size: 8px; font-style: normal; line-height: 1.4; }
+.test-bet-form { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-top: 11px; }
+.test-bet-form label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: #91a6bb; font-size: 9px; }
+.test-bet-form input, .test-bet-form select { width: 100%; min-height: 38px; padding: 8px 9px; border: 1px solid #2a425a; border-radius: 8px; outline: 0; color: #e1edf7; background: #0b1a2b; font-size: 11px; }
+.test-bet-form input:focus, .test-bet-form select:focus { border-color: #63b5e4; }
+.test-bet-form .primary-button { grid-column: 1 / -1; min-height: 40px; margin-top: 2px; }
+.game-inline-warning, .game-inline-success { margin-top: 9px; padding: 9px 10px; border: 1px solid rgba(229, 187, 107, .28); border-radius: 9px; color: #e8ca8b; background: rgba(132, 96, 41, .13); font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+.game-inline-success { border-color: rgba(81, 202, 146, .27); color: #a0e2c2; background: rgba(42, 135, 99, .12); }
+.game-inline-success small { display: block; margin-top: 5px; color: #9db4c9; }
+.game-no-auto-pay { margin: 8px 0 0; color: #71879e; font-size: 8px; line-height: 1.45; }
+.test-bet-top strong { color: #d0e0ee; font-size: 10px; }
+.test-bet-row > p { margin: 6px 0 0; color: #91a5b9; font-size: 9px; line-height: 1.4; }
+.game-result-pill { flex: 0 0 auto; padding: 4px 6px; border-radius: 6px; font-size: 8px; font-weight: 800; }
+.game-result-pill.pending { color: #edce8a; background: rgba(195, 148, 63, .14); }
+.game-result-pill.won { color: #8fe0ba; background: rgba(51, 158, 112, .16); }
+.game-result-pill.lost { color: #ec9e9d; background: rgba(176, 72, 76, .15); }
+.test-bet-payouts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(117, 145, 172, .15); color: #8198ad; font-size: 8px; }
+.test-bet-payouts strong { color: #bad8eb; }
+.game-payout-status { display: block; margin-top: 7px; color: #eccb82; font-size: 8px; }
+.agent-dashboard { margin-top: 14px; }
+.agent-invite-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #29445d; border-radius: 10px; background: rgba(13, 32, 51, .76); }
+.agent-invite-card > div { display: flex; flex-direction: column; gap: 4px; }
+.agent-invite-card small { color: #718ba2; font-size: 8px; }
+.agent-invite-card strong { color: #c8e4f3; font: 700 12px ui-monospace, monospace; letter-spacing: .07em; }
+.agent-invite-card button { padding: 7px 9px; border: 1px solid #315c77; border-radius: 7px; color: #9bd2ef; background: #122f45; font-size: 8px; }
+.agent-invite-url { margin: 6px 1px 0; color: #70869c; font-size: 8px; overflow-wrap: anywhere; }
+.agent-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.agent-metrics > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 9px; border: 1px solid #20364c; border-radius: 9px; background: rgba(7, 20, 34, .58); }
+.agent-metrics span, .agent-player-list article > div > span { color: #768da4; font-size: 8px; }
+.agent-metrics strong, .agent-player-list article > div > strong { color: #c7dced; font-size: 10px; overflow-wrap: anywhere; }
+.agent-net-pnl { margin-top: 8px; }
+.agent-commission-note { margin: 8px 0; color: #73899e; font-size: 8px; line-height: 1.5; }
+.agent-players-title { margin: 15px 0 8px; color: #cfdfed; font-size: 11px; }
+.agent-player-list article { display: grid; grid-template-columns: 1.4fr 1fr .8fr 1fr; gap: 7px; padding: 9px; border: 1px solid #20364c; border-radius: 9px; background: rgba(7, 20, 34, .54); }
+.agent-player-list article > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.agent-player-list article > div:first-child strong { color: #c9dceb; font-size: 9px; }
+.agent-player-list article > div:first-child small { color: #7389a0; font-size: 7px; overflow-wrap: anywhere; }
+@media (max-width: 420px) { .test-rounds-section, .test-bet-history, .agent-dashboard { padding: 11px; } .test-round-card, .test-bet-row { padding: 10px; } .test-game-odds > div { grid-template-columns: 1fr; } .test-bet-form { grid-template-columns: 1fr; } .test-bet-form .primary-button { grid-column: 1; } .agent-player-list article { grid-template-columns: 1fr 1fr; } }
