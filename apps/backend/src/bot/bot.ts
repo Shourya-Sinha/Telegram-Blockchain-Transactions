@@ -10,6 +10,7 @@ import { assertTelegramGroupMembership, chatAppKeyboard, envelopeAppUrl, envelop
 import { formatMinor, resolveWithdrawalMode } from '@red-envelope/shared';
 import { AppError } from '../utils/errors';
 import { botTexts, normalizeLocale } from './texts';
+import { applyAgentReferral } from '../services/agentService';
 
 function telegramIdentity(ctx: { from?: { id: number; username?: string; first_name: string } }) {
   if (!ctx.from) throw new AppError(401, 'Telegram user is missing', 'TELEGRAM_USER_MISSING');
@@ -90,6 +91,11 @@ export function createTelegramBot(): Bot {
     const locale = normalizeLocale(user.locale);
     const texts = botTexts(locale);
     const payload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
+    const agentReferral = payload.match(/^agent_([A-F0-9]{12})$/i);
+    if (agentReferral && config.fundsMode === 'test') {
+      try { await applyAgentReferral(user.id, agentReferral[1]); }
+      catch (error) { console.warn('[agent-referral] attribution was not applied', error); }
+    }
     // Groups never accept web_app buttons (Telegram answers BUTTON_TYPE_INVALID
     // and drops the whole message), so the group reply uses a t.me deep link
     // that opens the bot's private chat, where the wallet buttons live.

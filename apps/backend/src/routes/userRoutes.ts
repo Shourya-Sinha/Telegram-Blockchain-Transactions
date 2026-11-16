@@ -14,6 +14,8 @@ import { prisma } from '../lib/prisma';
 import { jsonSafe, resolveWithdrawalMode, TEST_CURRENCY_WARNING } from '@red-envelope/shared';
 import { grantAutomaticTestCredit } from '../services/devCreditService';
 import { asyncHandler } from '../utils/asyncHandler';
+import { assertTestGamesEnabled, listMyTestGameBets, listOpenTestGameRounds, placeTestGameBet } from '../services/testGameService';
+import { applyAgentReferral, getAgentReportForUser } from '../services/agentService';
 
 export const userRouter = Router();
 userRouter.use(telegramAuth);
@@ -88,6 +90,30 @@ userRouter.get('/groups', asyncHandler(async (req, res) => {
     if (group.enabled && await isTelegramGroupMember(group.chatId, req.telegramUser!.telegramId)) memberGroups.push(group);
   }
   res.json(jsonSafe(memberGroups));
+}));
+
+userRouter.get('/games/rounds', asyncHandler(async (_req, res) => {
+  assertTestGamesEnabled();
+  res.json(jsonSafe(await listOpenTestGameRounds()));
+}));
+userRouter.get('/games/bets', asyncHandler(async (req, res) => {
+  assertTestGamesEnabled();
+  res.json(jsonSafe(await listMyTestGameBets(req.telegramUser!.id)));
+}));
+userRouter.post('/games/rounds/:id/bets', rateLimit('test-game-bet'), asyncHandler(async (req, res) => {
+  const payload = z.object({
+    outcomeKey: z.string().min(1).max(40).regex(/^[A-Z0-9_]+$/),
+    stake: z.string().max(32).regex(/^\d+(\.\d{1,6})?$/)
+  }).parse(req.body);
+  const roundId = z.string().uuid().parse(String(req.params.id));
+  res.status(201).json(jsonSafe(await placeTestGameBet(req.telegramUser!.id, { roundId, ...payload })));
+}));
+userRouter.post('/agent/attribute', asyncHandler(async (req, res) => {
+  const payload = z.object({ inviteCode: z.string().min(1).max(32) }).parse(req.body);
+  res.json(jsonSafe(await applyAgentReferral(req.telegramUser!.id, payload.inviteCode)));
+}));
+userRouter.get('/agent/me', asyncHandler(async (req, res) => {
+  res.json(jsonSafe(await getAgentReportForUser(req.telegramUser!.id)));
 }));
 
 userRouter.post('/envelopes', rateLimit('envelope-create'), asyncHandler(async (req, res) => {

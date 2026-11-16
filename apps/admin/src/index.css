@@ -191,3 +191,65 @@
 .developer-preview-modal pre { min-height: 90px; max-height: 45vh; overflow: auto; margin: 0 0 14px; padding: 12px; border: 1px solid #20364c; border-radius: 9px; color: #c2d5e6; background: #081625; font: 11px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .developer-preview-actions { justify-content: flex-end; }
 @media (max-width: 700px) { .developer-message-panel { padding: 14px; } .developer-message-actions { align-items: flex-start; flex-direction: column; } .developer-preview-modal { padding: 15px; } }
+
+/* Test-only sweep presets, round settlement, and agent reporting. */
+.test-games-safety-panel, .test-profile-admin-panel, .game-round-create-panel, .admin-round-list-panel, .admin-agents-panel { margin-bottom: 14px; padding: 20px; }
+.test-games-safety-panel { border-color: rgba(230, 180, 84, .36); background: linear-gradient(145deg, rgba(109, 76, 30, .18), #0d1c2d); }
+.test-games-safety-panel > strong { color: #efcd82; font-size: 12px; }
+.test-games-safety-panel p { margin: 7px 0 0; color: #a89d83; font-size: 10px; line-height: 1.55; }
+.admin-game-select, .admin-profile-fields label, .admin-round-form label, .admin-agent-create label, .admin-agent-controls label, .admin-policy-box label, .admin-round-settle label { display: flex; flex-direction: column; gap: 6px; color: #91a6bb; font-size: 9px; }
+.admin-game-select { max-width: 380px; margin: 15px 0; }
+.admin-game-select select, .admin-profile-fields input, .admin-round-form input, .admin-round-form select, .admin-agent-create input, .admin-agent-controls input, .admin-policy-box input, .admin-round-settle select { min-width: 0; padding: 9px 10px; border: 1px solid #2a435b; border-radius: 8px; outline: 0; color: #dce9f4; background: #091728; font-size: 10px; }
+.admin-game-select select:focus, .admin-profile-fields input:focus, .admin-round-form input:focus, .admin-round-form select:focus, .admin-agent-create input:focus, .admin-agent-controls input:focus, .admin-policy-box input:focus, .admin-round-settle select:focus { border-color: #66b6e5; }
+.admin-profile-fields { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; align-items: end; gap: 10px; }
+.admin-profile-fields .admin-checkbox, .admin-agent-controls .admin-checkbox { display: flex; flex-direction: row; align-items: center; gap: 7px; min-height: 35px; white-space: nowrap; }
+.admin-checkbox input { accent-color: #65d3a4; }
+.admin-profile-note { margin: 12px 0; padding: 9px 10px; border: 1px solid rgba(229, 187, 107, .2); border-radius: 8px; color: #c9b883; background: rgba(121, 88, 34, .1); font-size: 9px; line-height: 1.5; }
+.admin-odds-table { max-height: 480px; margin-top: 12px; }
+.admin-odds-table table { min-width: 920px; }
+.admin-odds-table td { padding: 8px 11px; font-size: 9px; }
+.admin-odds-table td small { color: #d5b46d; }
+.odds-input { width: 85px; padding: 6px 7px; border: 1px solid #304a63; border-radius: 6px; outline: 0; color: #dce9f4; background: #091728; font-size: 10px; }
+.admin-profile-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.admin-profile-actions span { color: #748aa0; font-size: 9px; }
+.admin-profile-actions button { flex: 0 0 auto; }
+.admin-round-form { display: grid; grid-template-columns: 1.35fr 1.4fr .7fr .75fr auto; align-items: end; gap: 9px; margin-top: 15px; }
+.admin-round-form .login-button { min-height: 36px; padding: 8px 13px; font-size: 10px; }
+.admin-round-list { display: grid; gap: 11px; margin-top: 14px; }
+.admin-round-card, .admin-agent-card { padding: 14px; border: 1px solid #223950; border-radius: 12px; background: rgba(7, 20, 34, .55); }
+.admin-round-card-head, .admin-agent-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.admin-round-card-head > div, .admin-agent-card-head > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.admin-round-card-head strong, .admin-agent-card-head strong { color: #c9dbea; font-size: 10px; }
+.admin-round-card-head small, .admin-agent-card-head small { color: #758ba1; font-size: 8px; overflow-wrap: anywhere; }
+.admin-agent-card-head a { color: #83b8d9; font-size: 8px; overflow-wrap: anywhere; }
+.admin-round-settle { display: grid; grid-template-columns: minmax(170px, 1fr) auto; align-items: end; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #253e56; border-radius: 9px; background: rgba(11, 28, 45, .7); }
+.admin-round-settle small { grid-column: 1 / -1; color: #7c91a7; font-size: 8px; }
+.admin-round-settled-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 11px; padding: 10px; border: 1px solid #20364c; border-radius: 9px; background: rgba(11, 28, 45, .65); color: #8197ac; font-size: 8px; }
+.admin-round-settled-summary strong { color: #c2d6e6; }
+.admin-policy-box { margin-top: 10px; padding: 11px; border: 1px solid rgba(229, 187, 107, .28); border-radius: 9px; background: rgba(129, 91, 34, .1); }
+.admin-policy-box > strong { color: #e6c57e; font-size: 9px; }
+.admin-policy-box p { margin: 5px 0 9px; color: #a99a7c; font-size: 8px; line-height: 1.5; }
+.admin-policy-box > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.admin-policy-box > div button { color: #f0d08a; border-color: #6a5839; background: rgba(109, 82, 41, .25); }
+.admin-policy-selected { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(92, 192, 146, .24); border-radius: 8px; color: #96d7b6; background: rgba(41, 131, 94, .1); font-size: 9px; }
+.admin-policy-selected small { color: #7e9a8b; font-size: 8px; }
+.admin-round-bets { margin-top: 10px; }
+.admin-round-bets table { min-width: 1050px; }
+.admin-round-bets td { padding: 9px 10px; font-size: 9px; }
+.admin-round-bets td small { font-size: 8px; }
+.admin-agent-create { display: grid; grid-template-columns: 1.3fr 1fr auto; align-items: end; gap: 9px; margin: 14px 0 10px; padding: 11px; border: 1px solid #243c53; border-radius: 10px; background: rgba(8, 22, 38, .62); }
+.admin-agent-create button { min-height: 34px; }
+.admin-agent-list { display: grid; gap: 10px; margin-top: 12px; }
+.admin-agent-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 10px; }
+.admin-agent-controls label { min-width: 145px; }
+.admin-agent-controls .admin-checkbox { min-width: 150px; }
+.agent-report-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.agent-report-metrics span { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid #20364c; border-radius: 7px; color: #778da3; background: rgba(8, 22, 38, .57); font-size: 8px; }
+.agent-report-metrics strong { color: #bfd5e6; font-size: 9px; }
+.admin-agent-referrals { margin-top: 10px; border-top: 1px solid #22384e; padding-top: 9px; }
+.admin-agent-referrals summary { color: #9dcbe5; font-size: 9px; cursor: pointer; }
+.admin-agent-referrals .table-panel { margin-top: 9px; }
+.admin-agent-referrals table { min-width: 760px; }
+.admin-agent-referrals td { padding: 9px 11px; font-size: 9px; }
+@media (max-width: 1050px) { .admin-profile-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .admin-round-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .admin-round-form .login-button { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .test-games-safety-panel, .test-profile-admin-panel, .game-round-create-panel, .admin-round-list-panel, .admin-agents-panel { padding: 13px; } .admin-profile-fields, .admin-round-form, .admin-agent-create { grid-template-columns: 1fr; } .admin-round-form .login-button { grid-column: auto; } .admin-profile-actions { align-items: flex-start; flex-direction: column; } .admin-round-settle { grid-template-columns: 1fr; } .admin-round-settle small { grid-column: 1; } .admin-round-settled-summary { grid-template-columns: 1fr; } .admin-round-card-head, .admin-agent-card-head { flex-direction: column; } .admin-agent-controls { align-items: stretch; flex-direction: column; } .admin-agent-controls label { width: 100%; } .agent-report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

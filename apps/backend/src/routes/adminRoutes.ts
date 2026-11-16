@@ -18,6 +18,8 @@ import { AppError } from '../utils/errors';
 import { verifyTotp } from '../utils/totp';
 import { asyncHandler } from '../utils/asyncHandler';
 import { getVerifiedTelegramGroupUsername } from '../services/telegramService';
+import { assertTestGamesEnabled, confirmManualPayoutPolicy, createTestGameRound, listAdminTestGameRounds, listTestGameProfiles, recordManualTestPayout, settleTestGameRound, updateTestGameProfile } from '../services/testGameService';
+import { createAgentForTelegramId, listAdminAgentReports, updateAgent } from '../services/agentService';
 
 export const adminRouter = Router();
 
@@ -32,6 +34,69 @@ adminRouter.post('/auth/login', rateLimit('admin-login', 10), asyncHandler(async
 }));
 
 adminRouter.use(adminAuth);
+
+adminRouter.get('/test-games/profiles', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (_req, res) => {
+  res.json(jsonSafe(await listTestGameProfiles()));
+}));
+adminRouter.put('/test-games/profiles/:id', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({
+    name: z.string().trim().min(1).max(100),
+    stakeMin: z.string().max(32).regex(/^\d+(\.\d{1,6})?$/),
+    stakeMax: z.string().max(32).regex(/^\d+(\.\d{1,6})?$/),
+    odds: z.array(z.unknown()).min(1).max(200),
+    active: z.boolean()
+  }).parse(req.body);
+  const profileId = z.string().uuid().parse(String(req.params.id));
+  res.json(jsonSafe(await updateTestGameProfile(profileId, payload, req.adminUser!.id, req.ip)));
+}));
+adminRouter.get('/test-games/rounds', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  res.json(jsonSafe(await listAdminTestGameRounds(Number(req.query.limit ?? 50))));
+}));
+adminRouter.post('/test-games/rounds', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({
+    profileId: z.string().uuid(),
+    variant: z.enum(['SINGLE_MINE', 'CHAIN_MINE', 'NINE_MULTI_MINE']),
+    packetCount: z.number().int().refine((value) => [5, 6, 9].includes(value)),
+    targetDigit: z.number().int().min(0).max(9).default(0)
+  }).parse(req.body);
+  res.status(201).json(jsonSafe(await createTestGameRound(payload, req.adminUser!.id, req.ip)));
+}));
+adminRouter.post('/test-games/rounds/:id/settle', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({ outcomeKey: z.string().min(1).max(40).regex(/^[A-Z0-9_]+$/) }).parse(req.body);
+  const roundId = z.string().uuid().parse(String(req.params.id));
+  res.json(jsonSafe(await settleTestGameRound(roundId, payload.outcomeKey, req.adminUser!.id, req.ip)));
+}));
+adminRouter.post('/test-games/rounds/:id/payout-policy', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({
+    policy: z.enum(['MULTIPLIER_INCLUDES_STAKE', 'MULTIPLIER_IS_PROFIT']),
+    approvalReference: z.string().trim().min(3).max(200)
+  }).parse(req.body);
+  const roundId = z.string().uuid().parse(String(req.params.id));
+  res.json(jsonSafe(await confirmManualPayoutPolicy(roundId, payload.policy, payload.approvalReference, req.adminUser!.id, req.ip)));
+}));
+adminRouter.post('/test-games/bets/:id/manual-payout', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({ transferReference: z.string().trim().min(3).max(200) }).parse(req.body);
+  const betId = z.string().uuid().parse(String(req.params.id));
+  res.json(jsonSafe(await recordManualTestPayout(betId, payload.transferReference, req.adminUser!.id, req.ip)));
+}));
+
+adminRouter.get('/agents', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (_req, res) => {
+  assertTestGamesEnabled();
+  res.json(jsonSafe(await listAdminAgentReports()));
+}));
+adminRouter.post('/agents', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({
+    telegramId: z.string().regex(/^\d{1,20}$/),
+    commissionRateBps: z.number().int().min(0).max(10_000).default(0),
+    active: z.boolean().default(true)
+  }).parse(req.body);
+  res.status(201).json(jsonSafe(await createAgentForTelegramId(payload.telegramId, req.adminUser!.id, payload, req.ip)));
+}));
+adminRouter.put('/agents/:id', requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.FINANCE), asyncHandler(async (req, res) => {
+  const payload = z.object({ commissionRateBps: z.number().int().min(0).max(10_000), active: z.boolean() }).parse(req.body);
+  const agentId = z.string().uuid().parse(String(req.params.id));
+  res.json(jsonSafe(await updateAgent(agentId, payload, req.adminUser!.id, req.ip)));
+}));
 
 adminRouter.get('/envelopes/setup', asyncHandler(async (_req, res) => {
   const groups = await listRegisteredGroups();

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { MeResponse } from './api';
 
-type Tab = 'wallet' | 'defi' | 'yield' | 'apps';
+type Tab = 'wallet' | 'defi' | 'games' | 'yield' | 'apps';
 interface WalletState {
   activeTab: Tab;
   me?: MeResponse;

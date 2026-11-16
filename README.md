@@ -9,13 +9,15 @@ A TypeScript monorepo for a custodial Telegram Mini App (TMA) wallet and crypto 
 ```
 apps/
   backend/       Express + TypeScript API, grammY bot, Prisma, BullMQ workers, TronWeb gateway
-  frontend/      React/Vite Telegram Mini App with Wallet, DeFi, Yield and Apps tabs
+  frontend/      React/Vite Telegram Mini App with Wallet, DeFi, Games, Yield and Apps tabs
   admin/         React/Vite operations console with JWT/MFA-ready login, charts and controls
 packages/
   shared/        BigInt minor-unit money utilities and request schemas
 ```
 
 **New to the envelope flow?** Read the complete [group setup, admin sending, and user claiming guide](docs/RED_ENVELOPE_GUIDE.md). It explains which wallet pays, how a group is discovered, what members tap, and how to test safely without real funds.
+
+**Testing the poster-based game and agent workflow?** Read [`docs/TEST_GAMES_AND_AGENTS.md`](docs/TEST_GAMES_AND_AGENTS.md) for the editable test profiles, explicit round-result assumptions, dual payout calculations, manual-only payout tracking, first-touch invite attribution, and turnover commission reporting. The new flow is blocked outside `FUNDS_MODE=test`.
 
 **Confused about where the money actually moves?** [`docs/MONEY_FLOW.md`](docs/MONEY_FLOW.md) traces one envelope end to end: who is debited and when, why an admin send charges the treasury and not the admin, how the WeChat-style random split stays exact, and why a claim costs zero Tron transactions.
 
